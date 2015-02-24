@@ -24,11 +24,11 @@ type GoalSet = IM.IntMap Goals
 -- NOTE: in fast-forward, when a goal with level INFINITY is encountered, this
 -- process returns immediately the value INFINITY, and doesn't complete the goal
 -- set.
-goalSet :: ConnGraph -> Goals -> IO (Maybe (Level,GoalSet))
+goalSet :: ConnGraph a -> Goals -> IO (Maybe (Level,GoalSet))
 goalSet cg goals = go 0 IM.empty (RS.toList goals)
   where
   go !m !gs (g:rest) =
-    do Fact { .. } <- getNode cg g
+    do Fact { .. } <- getFact cg g
        i <- readIORef fLevel
 
        if i == maxBound
@@ -41,20 +41,20 @@ goalSet cg goals = go 0 IM.empty (RS.toList goals)
 
 -- | The difficulty heuristic for an effect: the lowest level where one of the
 -- effect's preconditions appears.
-difficulty :: ConnGraph -> EffectRef -> IO Level
+difficulty :: ConnGraph a -> EffectRef -> IO Level
 difficulty cg e =
-  do Effect { .. } <- getNode cg e
+  do Effect { .. } <- getEffect cg e
      if RS.null ePre
         then return 0
         else foldM minPrecondLevel maxBound (RS.toList ePre)
   where
   minPrecondLevel l ref =
-    do Fact { .. } <- getNode cg ref
+    do Fact { .. } <- getFact cg ref
        l' <- readIORef fLevel
        return $! min l l'
 
 -- | Extract a plan from a fixed connection graph.
-extractPlan :: ConnGraph -> Goals -> IO (Maybe (Int,GoalSet))
+extractPlan :: ConnGraph a -> Goals -> IO (Maybe (Int,GoalSet))
 extractPlan cg goals0 =
   do mb <- goalSet cg goals0
      case mb of
@@ -76,14 +76,14 @@ extractPlan cg goals0 =
          return (Just (plan,gs))
 
   solveGoal level acc@(plan,gs) g =
-    do Fact { .. } <- getNode cg g
+    do Fact { .. } <- getFact cg g
 
        -- the goal was solved by something else at this level
        isTrue <- readIORef fIsTrue
        if isTrue == level
           then return acc
           else do e             <- pickBest (level - 1) (RS.toList fAdd)
-                  Effect { .. } <- getNode cg e
+                  Effect { .. } <- getEffect cg e
                   writeIORef eInPlan True
                   gs'           <- foldM (filterGoals level) gs (RS.toList ePre)
                   mapM_ (markAdd level) (RS.toList eAdds)
@@ -92,7 +92,7 @@ extractPlan cg goals0 =
 
   -- insert goals into the goal set for the level where they become true
   filterGoals level gs f =
-    do Fact { .. } <- getNode cg f
+    do Fact { .. } <- getFact cg f
 
        isTrue <- readIORef fIsTrue
        isGoal <- readIORef fIsGoal
@@ -115,7 +115,7 @@ extractPlan cg goals0 =
 
   -- mark the fact as being added at level i
   markAdd i f =
-    do Fact { .. } <- getNode cg f
+    do Fact { .. } <- getFact cg f
        writeIORef fIsTrue i
 
 
@@ -126,7 +126,7 @@ extractPlan cg goals0 =
   pickBest level es = snd `fmap` foldM check (maxBound,error "pickBest") es
     where
     check acc@(d,_) r =
-      do Effect { .. } <- getNode cg r
+      do Effect { .. } <- getEffect cg r
          l <- readIORef eLevel
          if level /= l
             then return acc
@@ -139,15 +139,15 @@ extractPlan cg goals0 =
 -- Helpful Actions -------------------------------------------------------------
 
 -- | All applicable actions from the state.
-allActions :: ConnGraph -> State -> IO Effects
+allActions :: ConnGraph a -> State -> IO Effects
 allActions cg s = foldM enabledEffects RS.empty (RS.toList s)
   where
   enabledEffects effs ref =
-    do Fact { .. } <- getNode cg ref
+    do Fact { .. } <- getFact cg ref
        foldM checkEffect effs (RS.toList fPreCond)
 
   checkEffect effs ref =
-    do Effect { .. } <- getNode cg ref
+    do Effect { .. } <- getEffect cg ref
        l <- readIORef eLevel
        if l == 0
           then return $! RS.insert ref effs
@@ -155,13 +155,13 @@ allActions cg s = foldM enabledEffects RS.empty (RS.toList s)
 
 -- | Helpful actions are those in the first layer of the relaxed plan, that
 -- contribute something directly to the next layer.
-helpfulActions :: ConnGraph -> Effects -> Goals -> IO [EffectRef]
+helpfulActions :: ConnGraph a -> Effects -> Goals -> IO [EffectRef]
 helpfulActions cg refs goals
   | RS.null goals = return (RS.toList refs)
   | otherwise     = filterM isHelpful (RS.toList refs)
   where
   isHelpful ref =
-    do Effect { .. } <- getNode cg ref
+    do Effect { .. } <- getEffect cg ref
        inPlan        <- readIORef eInPlan
        return (inPlan && not (RS.null (RS.intersection goals eAdds)))
 
@@ -170,11 +170,11 @@ helpfulActions cg refs goals
 
 -- | True when the plan currently represented in the graph deletes a goal along
 -- the way.
-addedGoalDeletion :: ConnGraph -> Goals -> IO Bool
+addedGoalDeletion :: ConnGraph a -> Goals -> IO Bool
 addedGoalDeletion cg goals = go RS.empty (RS.toList goals)
   where
   go seen (ref : gs) =
-    do Fact { .. } <- getNode cg ref
+    do Fact { .. } <- getFact cg ref
        (seen',mb)  <- foldM checkDels (seen,Just RS.empty) (RS.toList fAdd)
        case mb of
          Just gs' -> go seen' (RS.toList gs' ++ gs)
@@ -188,7 +188,7 @@ addedGoalDeletion cg goals = go RS.empty (RS.toList goals)
          return acc
 
     | otherwise =
-      do Effect { .. } <- getNode cg ref
+      do Effect { .. } <- getEffect cg ref
 
          inPlan <- readIORef eInPlan
 
@@ -204,4 +204,4 @@ addedGoalDeletion cg goals = go RS.empty (RS.toList goals)
              seen' = RS.insert ref seen
 
 
-         next' `seq` return (RS.insert ref seen, next')
+         next' `seq` return (RS.insert ref seen', next')

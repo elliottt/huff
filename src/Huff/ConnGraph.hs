@@ -9,11 +9,10 @@ module Huff.ConnGraph (
   , resetConnGraph
   , buildConnGraph
 
-  , GraphNode(..)
+  , Key
 
-  , FactRef(),   Fact(..)
-  , OperRef(),   Oper(..)
-  , EffectRef(), Effect(..)
+  , FactRef(),   Fact(..),   getFact
+  , EffectRef(), Effect(..), getEffect
 
   , Level
 
@@ -48,18 +47,14 @@ type Effects = RS.RefSet EffectRef
 
 type Level   = Int
 
-data ConnGraph = ConnGraph { cgFacts        :: !(IOArray FactRef Fact)
-                           , cgOpers        :: !(IOArray OperRef Oper)
-                           , cgEffects      :: !(IOArray EffectRef Effect)
-                           , cgDirtyFacts   :: !(IORef [FactRef])
-                           , cgDirtyEffects :: !(IORef [EffectRef])
-                           }
+data ConnGraph a = ConnGraph { cgFacts        :: !(IOArray FactRef Fact)
+                             , cgEffects      :: !(IOArray EffectRef (Effect a))
+                             , cgDirtyFacts   :: !(IORef [FactRef])
+                             , cgDirtyEffects :: !(IORef [EffectRef])
+                             }
 
 
 newtype FactRef = FactRef Int
-                  deriving (Show,Eq,Ord,Ix,Enum)
-
-newtype OperRef = OperRef Int
                   deriving (Show,Eq,Ord,Ix,Enum)
 
 newtype EffectRef = EffectRef Int
@@ -82,33 +77,27 @@ data Fact = Fact { fProp  :: !I.Fact
                    -- ^ Effects that delete this fact
                  }
 
-data Oper = Oper { oEffects :: !Effects
-                   -- ^ Effects that correspond to instantiations of this
-                   -- operator
-                 , oName :: !T.Text
-                 }
+data Effect a = Effect { ePre       :: !Facts
+                       , eNumPre    :: !Int
+                       , eAdds      :: !Facts
+                       , eDels      :: !Facts
+                       , eOp        :: !(I.Operator a)
+                         -- ^ The operator that this effect came from
 
-data Effect = Effect { ePre       :: !Facts
-                     , eNumPre    :: !Int
-                     , eAdds      :: !Facts
-                     , eDels      :: !Facts
-                     , eOp        :: !OperRef
-                       -- ^ The operator that this effect came from
+                       , eDirty     :: !(IORef Bool)
 
-                     , eDirty     :: !(IORef Bool)
+                       , eInPlan    :: !(IORef Bool)
+                         -- ^ Whether or not this effect is a member of the
+                         -- current relaxed plan
 
-                     , eInPlan    :: !(IORef Bool)
-                       -- ^ Whether or not this effect is a member of the
-                       -- current relaxed plan
+                       , eIsInH     :: !(IORef Bool)
+                         -- ^ If this action is part of the helpful action set
 
-                     , eIsInH     :: !(IORef Bool)
-                       -- ^ If this action is part of the helpful action set
-
-                     , eLevel     :: !(IORef Level)
-                       -- ^ Membership level for this effect
-                     , eActivePre :: !(IORef Level)
-                       -- ^ Active preconditions for this effect
-                     }
+                       , eLevel     :: !(IORef Level)
+                         -- ^ Membership level for this effect
+                       , eActivePre :: !(IORef Level)
+                         -- ^ Active preconditions for this effect
+                       }
 
 
 instance RS.Ref FactRef where
@@ -123,7 +112,7 @@ instance RS.Ref EffectRef where
 -- Utility Functions -----------------------------------------------------------
 
 -- | Apply an effect to the state given, returning a new state.
-applyEffect :: ConnGraph -> EffectRef -> State -> IO State
+applyEffect :: ConnGraph a -> EffectRef -> State -> IO State
 applyEffect cg ref s =
   do Effect { .. } <- readArray (cgEffects cg) ref
      return $! (s RS.\\ eDels) `RS.union` eAdds
@@ -136,17 +125,14 @@ applyEffect cg ref s =
 -- adding a special empty fact that all effects with no preconditions will have
 -- as a precondition.  The empty fact is also added to the initial state, in the
 -- event that the problem has an empty initial state.
-buildConnGraph :: I.Domain a -> I.Problem -> IO (State,Goals,ConnGraph)
+buildConnGraph :: I.Domain a -> I.Problem -> IO (State,Goals,ConnGraph a)
 buildConnGraph dom prob =
   do emptyFact <- mkFact (I.Fact "<empty>" [])
      facts     <- mapM mkFact allFacts
      cgFacts   <- newListArray (FactRef 0, FactRef (length facts))
                       (emptyFact : facts)
 
-     opers   <- mapM mkOper (I.domOperators dom)
-     cgOpers <- newListArray (OperRef 0, OperRef (length opers - 1)) opers
-
-     effs      <- zipWithM (mkEffect cgOpers cgFacts) (map EffectRef [0 ..]) allEffs
+     effs      <- zipWithM (mkEffect cgFacts) (map EffectRef [0 ..]) allEffs
      cgEffects <- newListArray (EffectRef 0, EffectRef (length effs - 1)) effs
 
      cgDirtyFacts   <- newIORef []
@@ -164,9 +150,7 @@ buildConnGraph dom prob =
   factRefs = Map.fromList (zip allFacts (map FactRef [1 ..]))
 
   -- all ground effects, extended with the preconditions from their operators
-  allEffs = [ (oref, eff) | ix <- [ 0 .. ], let oref = OperRef ix
-                          | op <- I.domOperators dom, eff <- I.expandEffects op
-                          ]
+  allEffs = [ (op, eff) | op  <- I.domOperators dom, eff <- I.expandEffects op ]
   mkFact fProp =
     do fLevel  <- newIORef maxBound
        fIsTrue <- newIORef 0
@@ -177,12 +161,7 @@ buildConnGraph dom prob =
                    , fDel     = RS.empty
                    , .. }
 
-  mkOper op =
-    do let oEffects = RS.empty
-           oName    = I.opName op
-       return Oper { .. }
-
-  mkEffect opers facts ix (op,e) =
+  mkEffect facts ix (op,e) =
     do eLevel     <- newIORef maxBound
        eActivePre <- newIORef 0
        eInPlan    <- newIORef False
@@ -202,9 +181,6 @@ buildConnGraph dom prob =
                              , eDels   = refs (I.eDel e)
                              , eOp     = op
                              , .. }
-
-       Oper { .. } <- readArray opers op
-       writeArray opers op Oper { oEffects = RS.insert ix oEffects, .. }
 
        mapM_ pre (RS.toList  ePre)
        mapM_ add (RS.toList (eAdds eff))
@@ -228,42 +204,36 @@ buildConnGraph dom prob =
 
 -- Graph Interaction -----------------------------------------------------------
 
-class GraphNode a where
-  type Key a :: *
-  getNode :: ConnGraph -> Key a -> IO a
+type family Key node :: * where
+  Key Fact       = FactRef
+  Key (Effect a) = EffectRef
 
-instance GraphNode Fact where
-  type Key Fact = FactRef
-  getNode ConnGraph { .. } ref =
-    do fact @ Fact { .. } <- readArray cgFacts ref
-       isDirty            <- readIORef fDirty
-       unless isDirty $
-         do writeIORef fDirty True
-            modifyIORef cgDirtyFacts (ref :)
-       return fact
+getFact :: ConnGraph a -> FactRef -> IO Fact
+getFact ConnGraph { .. } ref =
+  do fact @ Fact { .. } <- readArray cgFacts ref
+     isDirty            <- readIORef fDirty
+     unless isDirty $
+       do writeIORef fDirty True
+          modifyIORef cgDirtyFacts (ref :)
+     return fact
 
-instance GraphNode Oper where
-  type Key Oper = OperRef
-  getNode ConnGraph { .. } = readArray cgOpers
-
-instance GraphNode Effect where
-  type Key Effect = EffectRef
-  getNode ConnGraph { .. } ref =
-    do eff @ Effect { .. } <- readArray cgEffects ref
-       isDirty             <- readIORef eDirty
-       unless isDirty $
-         do writeIORef eDirty True
-            modifyIORef cgDirtyEffects (ref :)
-       return eff
+getEffect :: ConnGraph a -> EffectRef -> IO (Effect a)
+getEffect ConnGraph { .. } ref =
+  do eff @ Effect { .. } <- readArray cgEffects ref
+     isDirty             <- readIORef eDirty
+     unless isDirty $
+       do writeIORef eDirty True
+          modifyIORef cgDirtyEffects (ref :)
+     return eff
 
 
 -- Resetting -------------------------------------------------------------------
 
 -- | Reset dirty references in the plan graph to their initial state.
-resetConnGraph :: ConnGraph -> IO ()
+resetConnGraph :: ConnGraph a -> IO ()
 resetConnGraph cg =
-  do mapM_ (resetFact   <=< getNode cg) =<< readIORef (cgDirtyFacts   cg)
-     mapM_ (resetEffect <=< getNode cg) =<< readIORef (cgDirtyEffects cg)
+  do mapM_ (resetFact   <=< getFact   cg) =<< readIORef (cgDirtyFacts   cg)
+     mapM_ (resetEffect <=< getEffect cg) =<< readIORef (cgDirtyEffects cg)
      writeIORef (cgDirtyFacts   cg) []
      writeIORef (cgDirtyEffects cg) []
 
@@ -274,7 +244,7 @@ resetFact Fact { .. } =
      writeIORef fIsGoal False
      writeIORef fDirty False
 
-resetEffect :: Effect -> IO ()
+resetEffect :: Effect a -> IO ()
 resetEffect Effect { .. } =
   do writeIORef eLevel maxBound
      writeIORef eActivePre 0
@@ -285,7 +255,7 @@ resetEffect Effect { .. } =
 
 -- Utilities -------------------------------------------------------------------
 
-printFacts :: ConnGraph -> IO ()
+printFacts :: ConnGraph a -> IO ()
 printFacts ConnGraph { .. } = amapWithKeyM_ printFact cgFacts
 
 printFact :: FactRef -> Fact -> IO ()
@@ -305,15 +275,13 @@ printFact ref Fact { .. } =
        , "  deleted by: " ++ show fDel
        ]
 
-printEffects :: ConnGraph -> IO ()
-printEffects cg = amapWithKeyM_ (printEffect cg) (cgEffects cg)
+printEffects :: ConnGraph a -> IO ()
+printEffects cg = amapWithKeyM_ printEffect (cgEffects cg)
 
-printEffect :: ConnGraph -> EffectRef -> Effect -> IO ()
-printEffect cg ref Effect { .. } =
-
-  do Oper { .. } <- getNode cg eOp
-
-     putStrLn ("Effect (" ++ show ref ++ ") " ++ T.unpack oName)
+printEffect :: EffectRef -> Effect a -> IO ()
+printEffect ref Effect { .. } =
+  do let I.Operator { .. } = eOp
+     putStrLn ("Effect (" ++ show ref ++ ") " ++ T.unpack opName)
 
      lev <- readIORef eLevel
 

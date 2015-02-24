@@ -8,7 +8,7 @@ import Huff.Compile.AST
 
 -- | Generate operators from the problem description.  This corresponds to the
 -- "Initial Conditions and Goals" section.
-genProblemOperators :: Problem -> (Problem, Operator)
+genProblemOperators :: Problem -> (Problem, Operator a)
 genProblemOperators Problem { .. } = (prob, goalOp)
   where
 
@@ -23,4 +23,5 @@ genProblemOperators Problem { .. } = (prob, goalOp)
                     , opParams  = []
                     , opPrecond = probGoal
                     , opEffects = ELit goalAtom
+                    , opVal     = Nothing
                     }

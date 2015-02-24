@@ -18,10 +18,9 @@ import qualified Data.IntMap.Strict as IM
 import           Data.List ( sortBy )
 import           Data.Maybe ( isJust, fromMaybe, catMaybes )
 import           Data.Ord ( comparing )
-import qualified Data.Text as T
 
 
-type Plan a = [T.Text]
+type Plan a = [I.Operator a]
 
 data Result a = EnforcedHillClimbing (Plan a)
               | GreedyBFS (Plan a)
@@ -46,16 +45,15 @@ findPlan prob dom =
   mkPlan _  _ Nothing     = return Nothing
 
   getOper cg eref =
-    do Effect { .. } <- getNode cg eref
-       Oper { .. }   <- getNode cg eOp
-       return oName
+    do Effect { .. } <- getEffect cg eref
+       return eOp
 
 
 -- Enforced Hill Climbing ------------------------------------------------------
 
 type Steps = [EffectRef]
 
-enforcedHillClimbing :: Hash -> ConnGraph -> Node -> Goals -> IO (Maybe Steps)
+enforcedHillClimbing :: Hash -> ConnGraph a -> Node -> Goals -> IO (Maybe Steps)
 enforcedHillClimbing hash cg root goal =
   loop root
 
@@ -73,7 +71,7 @@ enforcedHillClimbing hash cg root goal =
 
 -- | Find a state whose heuristic value is strictly smaller than the current
 -- state.
-findBetterState :: Hash -> ConnGraph -> Node -> Goals -> IO (Maybe Node)
+findBetterState :: Hash -> ConnGraph a -> Node -> Goals -> IO (Maybe Node)
 findBetterState hash cg n goal =
   do let Heuristic { .. } = nodeHeuristic n
      acts  <- helpfulActions cg hActions hGoals
@@ -85,7 +83,7 @@ findBetterState hash cg n goal =
 
 -- Greedy Best-first Search ----------------------------------------------------
 
-greedyBestFirst :: Hash -> ConnGraph -> Node -> Goals -> IO (Maybe Steps)
+greedyBestFirst :: Hash -> ConnGraph a -> Node -> Goals -> IO (Maybe Steps)
 greedyBestFirst hash cg root goal =
   go HS.empty $ Heap.singleton root
       { nodeHeuristic = (nodeHeuristic root) { hMeasure = maxBound }}
@@ -136,7 +134,7 @@ instance Ord Node where
   compare = compare `on` aStarMeasure
   {-# INLINE compare #-}
 
-rootNode :: ConnGraph -> State -> Goals -> IO (Maybe Node)
+rootNode :: ConnGraph a -> State -> Goals -> IO (Maybe Node)
 rootNode cg nodeState goal =
   do mbH <- measureState False cg nodeState goal
      case mbH of
@@ -179,7 +177,7 @@ extractPath  = go []
 
 -- | Apply effects to the current state, returning the valid choices ordered by
 -- their heuristic value.
-successors :: Bool -> Hash -> ConnGraph -> Node -> Goals -> [EffectRef]
+successors :: Bool -> Hash -> ConnGraph a -> Node -> Goals -> [EffectRef]
            -> IO [Node]
 successors checkGD hash cg parent goal refs =
   do mbs <- mapM heuristic refs
@@ -219,7 +217,7 @@ badHeuristic  = Heuristic { hMeasure     = maxBound
 
 -- compute the heuristic value for the state that results after applying the
 -- given effect, and hash it.
-computeHeuristic :: Bool -> Hash -> ConnGraph -> State -> Goals
+computeHeuristic :: Bool -> Hash -> ConnGraph a -> State -> Goals
                  -> IO (Maybe Heuristic)
 computeHeuristic checkGD hash cg s goal =
   do mb <- lookupState hash s
@@ -234,7 +232,7 @@ computeHeuristic checkGD hash cg s goal =
 
 -- | Compute the size of the relaxed plan produced by the given starting state
 -- and goals.
-measureState :: Bool -> ConnGraph -> State -> Goals -> IO (Maybe Heuristic)
+measureState :: Bool -> ConnGraph a -> State -> Goals -> IO (Maybe Heuristic)
 measureState checkGD cg s goal =
   do _        <- buildFixpoint cg s goal
      mb       <- extractPlan cg goal

@@ -20,7 +20,7 @@ import           Data.Monoid ( mconcat )
 -- facts, and delete effects are ignored, this operation will terminate.  The
 -- set of effects returned is the set of effects that are immediately applicable
 -- to the initial state.
-buildFixpoint :: ConnGraph -> State -> Goals -> IO Int
+buildFixpoint :: ConnGraph a -> State -> Goals -> IO Int
 buildFixpoint gr s0 g =
   do resetConnGraph gr
      loop 0 s0
@@ -39,13 +39,13 @@ buildFixpoint gr s0 g =
 
 -- | All goals have been reached if they are all activated in the connection
 -- graph.
-allGoalsReached :: ConnGraph -> Goals -> IO Bool
+allGoalsReached :: ConnGraph a -> Goals -> IO Bool
 allGoalsReached cg g = go goals
   where
   goals     = RS.toList g
 
   -- require that all goals have a level that isn't infinity.
-  go (r:rs) = do Fact { .. } <- getNode cg r
+  go (r:rs) = do Fact { .. } <- getFact cg r
                  l <- readIORef fLevel
                  if l < maxBound
                     then go rs
@@ -56,9 +56,9 @@ allGoalsReached cg g = go goals
 
 -- | Set a fact to true at this level of the relaxed graph.  Return any effects
 -- that were enabled by adding this fact.
-activateFact :: ConnGraph -> Level -> FactRef -> IO Effects
+activateFact :: ConnGraph a -> Level -> FactRef -> IO Effects
 activateFact cg level ref =
-  do Fact { .. } <- getNode cg ref
+  do Fact { .. } <- getFact cg ref
      writeIORef fLevel level
 
      foldM addedPrecond RS.empty (RS.toList fPreCond)
@@ -66,7 +66,7 @@ activateFact cg level ref =
   where
 
   addedPrecond effs eff =
-    do Effect { .. } <- getNode cg eff
+    do Effect { .. } <- getEffect cg eff
 
        -- skip effects that are already activated
        l <- readIORef eLevel
@@ -81,8 +81,8 @@ activateFact cg level ref =
                      else return effs
 
 -- | Add an effect at level i, and return all of its add effects.
-activateEffect :: ConnGraph -> Level -> EffectRef -> IO Facts
+activateEffect :: ConnGraph a -> Level -> EffectRef -> IO Facts
 activateEffect cg level ref =
-  do Effect { .. } <- getNode cg ref
+  do Effect { .. } <- getEffect cg ref
      writeIORef eLevel level
      return eAdds

@@ -9,22 +9,21 @@ import           Data.Monoid (Monoid(..))
 import qualified Data.Text as T
 
 
-data Domain = Domain { domName      :: !T.Text
-                     , domOperators :: [Operator]
-                     } deriving (Show)
+data Domain a = Domain { domOperators :: [Operator a]
+                       } deriving (Show)
 
-data Problem = Problem { probDomain :: !T.Text
-                       , probObjects:: [Object]
+data Problem = Problem { probObjects:: [Object]
                        , probInit   :: [Literal]
                        , probGoal   :: Term
                        } deriving (Show)
 
-data Operator = Operator { opName    :: !T.Text
-                         , opDerived :: !Bool
-                         , opParams  :: [Param]
-                         , opPrecond :: Term
-                         , opEffects :: Effect
-                         } deriving (Show)
+data Operator a = Operator { opName    :: !T.Text
+                           , opDerived :: !Bool
+                           , opParams  :: [Param]
+                           , opVal     :: Maybe a
+                           , opPrecond :: Term
+                           , opEffects :: Effect
+                           } deriving (Show)
 
 type Name = T.Text
 

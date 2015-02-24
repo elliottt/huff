@@ -22,7 +22,7 @@ import qualified Data.Text as T
 
 -- | Expand out instances of an operator, based on the types of its parameters.
 -- This is similar to the case of existential elimination covered lower down.
-expandActions :: TypeMap Name -> Operator -> [(ArgEnv,Operator)]
+expandActions :: TypeMap Name -> Operator a -> [(ArgEnv,Operator a)]
 expandActions types op @ Operator { .. }
 
   | null opParams =
@@ -54,7 +54,7 @@ expandActions types op @ Operator { .. }
 --
 -- INVARIANT: This stage removes the TForall and TExists constructors from the
 -- pre and post conditions.
-removeQuantifiers :: TypeMap Name -> ArgEnv -> Operator -> Operator
+removeQuantifiers :: TypeMap Name -> ArgEnv -> Operator a -> Operator a
 removeQuantifiers types env Operator { .. } =
   Operator { opPrecond = rqTerm types env opPrecond
            , opEffects = rqEff  types env opEffects
@@ -121,7 +121,7 @@ substAtom env (Atom s as) = Atom s (map subst as)
 -- disjunction was found to be true.
 --
 -- INVARIANT: This stage removes the TOr, TNot, and TImply constructors.
-removeDisjunction :: Operator -> [Operator]
+removeDisjunction :: Operator a -> [Operator a]
 removeDisjunction Operator { .. } =
   case rdOper of
     [res] -> return (mkOper res)
@@ -205,7 +205,7 @@ negLit (LNot  a) = LAtom a
 -- INVARIANT: This stage removes all negative literals from the preconditions of
 -- operators and conditional effects, replacing them with other literals that
 -- correspond to their negation.
-removeNegation :: Problem -> [Operator] -> (Problem,[Operator])
+removeNegation :: Problem -> [Operator a] -> (Problem,[Operator a])
 removeNegation prob ops
   | Set.null negs = (prob,ops)
   | otherwise     = (prob', map (cnOper negs) ops)
@@ -239,7 +239,7 @@ initNegs negs [] =
   [ LAtom (negAtom a) | a <- Set.toList negs ]
 
 
-negPreconds :: Operator -> Set.Set Atom
+negPreconds :: Operator a -> Set.Set Atom
 negPreconds Operator { .. } = mappend (negTerms   opPrecond)
                                       (negEffects opEffects)
 
@@ -260,7 +260,7 @@ negEffects (EWhen p _) = negTerms p
 negEffects _           = Set.empty
 
 
-cnOper :: Set.Set Atom -> Operator -> Operator
+cnOper :: Set.Set Atom -> Operator a -> Operator a
 cnOper negs Operator { .. } =
   Operator { opPrecond = cnTerms opPrecond
            , opEffects = cnEffects negs opEffects
