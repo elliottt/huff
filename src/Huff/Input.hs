@@ -13,14 +13,15 @@ data Problem = Problem { probInit :: [Fact]
                        } deriving (Show)
 
 -- | A collection of named operators.
-newtype Domain = Domain { domOperators :: [Operator]
-                        } deriving (Show)
+newtype Domain a = Domain { domOperators :: [Operator a]
+                          } deriving (Show)
 
 -- | Operators, consisting of preconditions and effects.
-data Operator = Operator { opName    :: !T.Text
-                         , opPre     :: [Fact]
-                         , opEffects :: [Effect]
-                         } deriving (Show)
+data Operator a = Operator { opName    :: !T.Text
+                           , opPre     :: [Fact]
+                           , opEffects :: [Effect]
+                           , opVal     :: a
+                           } deriving (Show)
 
 -- | Effects, optionally guarded by additional conditions.
 data Effect = Effect { ePre :: [Fact]
@@ -41,10 +42,10 @@ instance IsString Fact where
 probFacts :: Problem -> Set.Set Fact
 probFacts Problem { .. } = Set.fromList (probInit ++ probGoal)
 
-domFacts :: Domain -> Set.Set Fact
+domFacts :: Domain a -> Set.Set Fact
 domFacts Domain { .. } = Set.unions (map opFacts domOperators)
 
-opFacts :: Operator -> Set.Set Fact
+opFacts :: Operator a -> Set.Set Fact
 opFacts Operator { .. } =
   Set.unions (Set.fromList opPre : map effFacts opEffects)
 
@@ -53,7 +54,7 @@ effFacts Effect { .. } = Set.fromList (ePre ++ eAdd ++ eDel)
 
 
 -- | Emit effects that have the operator's precondition guarding their effects.
-expandEffects :: Operator -> [Effect]
+expandEffects :: Operator a -> [Effect]
 expandEffects Operator { .. } = map addPrecond opEffects
   where
   addPrecond Effect { .. } = Effect { ePre = opPre ++ ePre, .. }

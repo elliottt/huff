@@ -136,7 +136,7 @@ applyEffect cg ref s =
 -- adding a special empty fact that all effects with no preconditions will have
 -- as a precondition.  The empty fact is also added to the initial state, in the
 -- event that the problem has an empty initial state.
-buildConnGraph :: I.Domain -> I.Problem -> IO (State,Goals,ConnGraph)
+buildConnGraph :: I.Domain a -> I.Problem -> IO (State,Goals,ConnGraph)
 buildConnGraph dom prob =
   do emptyFact <- mkFact (I.Fact "<empty>" [])
      facts     <- mapM mkFact allFacts

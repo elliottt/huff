@@ -21,13 +21,13 @@ import           Data.Ord ( comparing )
 import qualified Data.Text as T
 
 
-type Plan = [T.Text]
+type Plan a = [T.Text]
 
-data Result = EnforcedHillClimbing Plan
-            | GreedyBFS Plan
-              deriving (Show)
+data Result a = EnforcedHillClimbing (Plan a)
+              | GreedyBFS (Plan a)
+                deriving (Show)
 
-findPlan :: I.Problem -> I.Domain -> IO (Maybe Result)
+findPlan :: I.Problem -> I.Domain a -> IO (Maybe (Result a))
 findPlan prob dom =
   do (s0,goal,cg) <- buildConnGraph dom prob
      hash         <- newHash
