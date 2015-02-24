@@ -12,7 +12,7 @@ import qualified Huff.Input as I
 import qualified Data.Text as T
 
 
-compile :: Problem -> Domain a -> (I.Problem,I.Domain a)
+compile :: Problem -> Domain a -> (I.Problem,I.Domain (Operator a))
 compile prob dom = ( transProblem prob''
                    , transDomain dom { domOperators = ops' } )
   where
@@ -32,16 +32,16 @@ transProblem Problem { .. } =
             , I.probGoal = transPre probGoal
             }
 
-transDomain :: Domain a -> I.Domain a
+transDomain :: Domain a -> I.Domain (Operator a)
 transDomain Domain { .. } =
   I.Domain { I.domOperators = map transOperator domOperators }
 
-transOperator :: Operator a -> I.Operator a
-transOperator Operator { .. } =
+transOperator :: Operator a -> I.Operator (Operator a)
+transOperator op @ Operator { .. } =
   I.Operator { I.opName    = opName
              , I.opPre     = transPre opPrecond
              , I.opEffects = transEff opEffects
-             , I.opVal     = undefined
+             , I.opVal     = op
              }
 
 transPre :: Term -> [I.Fact]
