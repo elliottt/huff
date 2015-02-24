@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Huff.Compile (
     compile
-  , module FF.Compile.AST
+  , module Huff.Compile.AST
   ) where
 
 import           Huff.Compile.AST
