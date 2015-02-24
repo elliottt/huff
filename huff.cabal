@@ -3,26 +3,36 @@
 
 name:                huff
 version:             0.1.0.0
--- synopsis:            
--- description:         
+synopsis:            A fast-foward based planner
+-- description:        j
 license:             BSD3
 license-file:        LICENSE
 author:              Trevor Elliott
 maintainer:          awesomelyawesome@gmail.com
--- copyright:           
 category:            AI
 build-type:          Simple
--- extra-source-files:  
 cabal-version:       >=1.10
 
 library
-  -- exposed-modules:     
-  -- other-modules:       
-  -- other-extensions:    
+  exposed-modules:     Huff
+
+  other-modules:       Huff.Compile
+                       Huff.Compile.AST
+                       Huff.Compile.Operators
+                       Huff.Compile.Problem
+                       Huff.ConnGraph
+                       Huff.Extract
+                       Huff.Fixpoint
+                       Huff.Input
+                       Huff.Planner
+                       Huff.RefSet
+
   build-depends:       base >=4.7 && <5,
                        containers,
                        heaps,
                        hashable,
-                       unordered-containers
+                       unordered-containers,
+                       monadLib
+
   hs-source-dirs:      src
   default-language:    Haskell2010

@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Huff.Compile (
     compile
+  , extractPlan
   , module Huff.Compile.AST
   ) where
 
@@ -9,6 +10,7 @@ import           Huff.Compile.Operators
 import           Huff.Compile.Problem
 import qualified Huff.Input as I
 
+import           Data.Maybe (mapMaybe)
 import qualified Data.Text as T
 
 
@@ -24,6 +26,10 @@ compile prob dom = ( transProblem prob''
     do op        <- goalOp : domOperators dom
        (env,op') <- expandActions types op
        removeDisjunction (removeQuantifiers types env op')
+
+
+extractPlan :: [I.Operator (Operator a)] -> [a]
+extractPlan  = mapMaybe (opVal . I.opVal)
 
 
 transProblem :: Problem -> I.Problem
