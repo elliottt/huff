@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Huff.Compile.AST where
 
@@ -13,6 +14,7 @@ data Domain a = Domain { domOperators :: [Operator a]
                        } deriving (Show)
 
 data Problem = Problem { probObjects:: [Object]
+                       , probPreds  :: [Pred]
                        , probInit   :: [Literal]
                        , probGoal   :: Term
                        } deriving (Show)
@@ -96,8 +98,16 @@ data Literal = LAtom Atom
              | LNot  Atom
                deriving (Show)
 
-data Atom = Atom !Name [Arg]
+data App a = App !Name [a]
             deriving (Show,Eq,Ord)
+
+type Atom = App Arg
+
+pattern Atom n as = App n as
+
+type Pred = App Type
+
+pattern Pred n ts = App n ts
 
 data Arg = AName !Name
          | AVar  !Name
