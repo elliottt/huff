@@ -62,35 +62,36 @@ objValue :: Obj ty -> T.Text
 objValue (Obj str) = str
 
 
-data Pred (args :: [Symbol]) = Pred T.Text
-
 -- | A fully applied predicate.
 data Atom = Atom I.Atom
 
-class IsPred (args :: [Symbol]) where
-  predArgs :: proxy args -> [T.Text]
+data Sig (sig :: [Symbol]) = Pred
 
-  type PredSig args :: *
+class IsPred (sig :: [Symbol]) where
+  type PredFun sig :: *
+  predFun :: T.Text -> [T.Text] -> proxy sig -> PredFun sig
+  predArgs :: proxy sig -> [T.Text]
 
 instance IsPred '[] where
+  type PredFun '[] = Atom
+
+  predFun n as _ = Atom (I.Atom n (map I.AName (reverse as)))
   predArgs _ = []
 
-  type PredSig '[] = Atom
-
 instance (KnownSymbol a, IsPred as) => IsPred (a ': as) where
+  type PredFun (a ': as) = Obj a -> PredFun as
+
   predArgs _ = T.pack sym : rest
     where
     sym  = symbolVal (Proxy :: Proxy a)
     rest = predArgs (Proxy :: Proxy as)
 
-  type PredSig (a ': as) = Obj a -> PredSig as
 
-newPred :: IsPred args => T.Text -> Huff step (Pred args)
-newPred sym = Huff $
-  do let p = Pred sym
-     RW { .. } <- get
-     set RW { rwPreds = I.Pred sym (predArgs p) : rwPreds, .. }
-     return p
+newPred :: IsPred sig => T.Text -> Sig sig -> Huff step (PredFun sig)
+newPred sym sig = Huff $
+  do RW { .. } <- get
+     set RW { rwPreds = I.Pred sym (predArgs sig) : rwPreds, .. }
+     return (predFun sym [] sig)
 
 
 data Action (args :: [Symbol]) step
