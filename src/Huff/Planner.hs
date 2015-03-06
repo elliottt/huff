@@ -20,13 +20,13 @@ import           Data.Maybe ( isJust, fromMaybe, catMaybes )
 import           Data.Ord ( comparing )
 
 
-type Plan a = [I.Operator a]
+type Plan a = Result (I.Operator a)
 
-data Result a = EnforcedHillClimbing (Plan a)
-              | GreedyBFS (Plan a)
+data Result a = EnforcedHillClimbing [a]
+              | GreedyBFS [a]
                 deriving (Show)
 
-findPlan :: I.Problem -> I.Domain a -> IO (Maybe (Result a))
+findPlan :: I.Problem -> I.Domain a -> IO (Maybe (Plan a))
 findPlan prob dom =
   do (s0,goal,cg) <- buildConnGraph dom prob
      hash         <- newHash
