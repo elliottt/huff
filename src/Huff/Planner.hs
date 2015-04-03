@@ -1,5 +1,8 @@
 {-# LANGUAGE RecordWildCards #-}
-module Huff.Planner where
+module Huff.Planner (
+    Plan, Result(..), resSteps,
+    findPlan
+  ) where
 
 import           Huff.ConnGraph
 import           Huff.Extract ( extractPlan, allActions, helpfulActions
@@ -25,6 +28,10 @@ type Plan a = Result (I.Operator a)
 data Result a = EnforcedHillClimbing [a]
               | GreedyBFS [a]
                 deriving (Show)
+
+resSteps :: Result a -> [a]
+resSteps (EnforcedHillClimbing as) = as
+resSteps (GreedyBFS as)            = as
 
 findPlan :: I.Problem -> I.Domain a -> IO (Maybe (Plan a))
 findPlan prob dom =

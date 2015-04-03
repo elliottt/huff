@@ -32,6 +32,8 @@ library
                        heaps,
                        hashable,
                        unordered-containers,
+                       text,
+                       array,
                        monadLib
 
   hs-source-dirs:      src

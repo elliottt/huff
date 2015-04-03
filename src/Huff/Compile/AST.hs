@@ -69,6 +69,10 @@ mkTAnd :: [Term] -> Term
 mkTAnd [t] = t
 mkTAnd ts  = TAnd ts
 
+mkTOr :: [Term] -> Term
+mkTOr [t] = t
+mkTOr ts  = TOr ts
+
 data Effect = EForall [Param] Effect
             | EWhen Term [Literal]
             | EAnd [Effect]

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -10,12 +11,13 @@
 
 module Huff where
 
-import qualified Huff.Planner as I
 import qualified Huff.Compile as I
+import qualified Huff.Input   as Input
+import qualified Huff.Planner as I
 
-import           Control.Applicative (Applicative)
 import           Control.Monad (forM_)
 import qualified Data.Map.Strict as Map
+import           Data.Maybe (mapMaybe)
 import           Data.Proxy (Proxy(..))
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -39,8 +41,8 @@ data RW step = RW { rwOps :: [I.Operator step]
                   , rwGoal :: [I.Term]
                   }
 
-runHuff :: Huff step () -> (I.Domain step,I.Problem)
-runHuff (Huff m) = (I.Domain { .. }, I.Problem { .. })
+runHuff :: Huff step () -> (I.Problem,I.Domain step)
+runHuff (Huff m) = (I.Problem { .. }, I.Domain { .. })
   where
   (_,rw) = runM m RW { rwOps   = []
                      , rwPreds = []
@@ -55,11 +57,21 @@ runHuff (Huff m) = (I.Domain { .. }, I.Problem { .. })
   probObjects = [ I.Typed obj ty | (ty,objs) <- Map.toList (rwTypes rw)
                                  , obj       <- Set.toList objs ]
 
+  -- XXX define the predicates
   probPreds = []
 
   probInit = rwInit rw
 
   probGoal = I.mkTAnd (rwGoal rw)
+
+
+findPlan :: Huff step () -> IO (Maybe [step])
+findPlan m =
+  do let (prob,dom)   = runHuff m
+     mbOps <- uncurry I.findPlan (I.compile prob dom)
+     case mbOps of
+       Just res -> return (Just (mapMaybe (I.opVal . Input.opVal) (I.resSteps res)))
+       Nothing  -> return Nothing
 
 
 
@@ -93,8 +105,53 @@ objValue :: Obj ty -> T.Text
 objValue (Obj str) = str
 
 
+-- Goal Descriptions -----------------------------------------------------------
+
+class IsGD a where
+  toGD :: a -> GD
+
+toTerm :: IsGD a => a -> I.Term
+toTerm a = unGD (toGD a)
+
+newtype GD = GD { unGD :: I.Term }
+
+instance IsGD GD where
+  toGD = id
+
+goal :: IsGD a => a -> Huff step ()
+goal gd = Huff $
+  do RW { .. } <- get
+     set RW { rwGoal = toTerm gd : rwGoal, .. }
+
+orGD :: IsGD a => [a] -> GD
+orGD gds = GD (I.mkTOr (map toTerm gds))
+
+andGD :: IsGD a => [a] -> GD
+andGD gds = GD (I.mkTAnd (map toTerm gds))
+
+notGD :: IsGD a => a -> GD
+notGD gd = GD (I.TNot (toTerm gd))
+
+(==>) :: (IsGD a, IsGD b) => a -> b -> GD
+a ==> b = GD (I.TImply (toTerm a) (toTerm b))
+
+
 -- | A fully applied predicate.
-data Atom = Atom I.Literal
+newtype Atom = Atom { unAtom :: I.Literal }
+
+negA :: Atom -> Atom
+negA (Atom (I.LAtom a)) = Atom (I.LNot  a)
+negA (Atom (I.LNot  a)) = Atom (I.LAtom a)
+
+instance IsGD Atom where
+  toGD (Atom lit) = GD (I.TLit lit)
+
+-- | Add an initial assumption.
+assume :: Atom -> Huff step ()
+assume (Atom lit) = Huff $
+  do RW { .. } <- get
+     set RW { rwInit = lit : rwInit, .. }
+
 
 data Sig (sig :: [Symbol]) = Pred
 
@@ -127,6 +184,27 @@ newPred sym sig = Huff $
      return (predFun sym [] sig)
 
 
+-- Effects ---------------------------------------------------------------------
+
+class IsEff eff where
+  toEff :: eff -> Eff
+
+toEffect :: IsEff eff => eff -> I.Effect
+toEffect eff = unEff (toEff eff)
+
+newtype Eff = Eff { unEff :: I.Effect }
+
+instance IsEff Eff where
+  toEff = id
+
+instance IsEff Atom where
+  toEff (Atom lit) = Eff (I.ELit lit)
+
+cond :: IsGD cond => cond -> [Atom] -> Eff
+cond cond as = Eff (I.EWhen (toTerm cond) (map unAtom as))
+
+
+-- Actions ---------------------------------------------------------------------
 
 newtype Action step a = Action (StateT (PartialAction step) Id a)
                         deriving (Functor,Applicative,Monad)
@@ -139,10 +217,15 @@ data PartialAction step = PartialAction { paPre  :: [I.Term]
 emptyPartialAction :: PartialAction step
 emptyPartialAction  = PartialAction { paPre = [], paEff = [], paVal = Nothing }
 
-preCond :: Atom -> Action step ()
-preCond (Atom a) = Action $
+preCond :: IsGD a => a -> Action step ()
+preCond gd = Action $
   do PartialAction { .. } <- get
-     set PartialAction { paPre = I.TLit a : paPre, .. }
+     set PartialAction { paPre = toTerm gd : paPre, .. }
+
+effect :: IsEff eff => eff -> Action step ()
+effect eff = Action $
+  do PartialAction { .. } <- get
+     set PartialAction { paEff = toEffect eff : paEff, .. }
 
 action :: step -> Action step ()
 action s = Action $
@@ -168,16 +251,59 @@ newAction (Action body) = Huff $
 -- Tests -----------------------------------------------------------------------
 
 test =
-  do vehicle <- newType (Proxy :: Proxy "vehicle")
-     car     <- newObj "car"  vehicle
-     bike    <- newObj "bike" vehicle
+  do place         <- newType (Proxy :: Proxy "place")
+     supermarket   <- newObj "supermarket"    place
+     hardwareStore <- newObj "hardware-store" place
+     home          <- newObj "home"           place
 
-     person  <- newType (Proxy :: Proxy "person")
-     me      <- newObj "me"  person
-     you     <- newObj "you" person
+     good          <- newType (Proxy :: Proxy "good")
+     hammer        <- newObj "hammer" good
+     drill         <- newObj "drill"  good
+     banana        <- newObj "banana" good
 
-     uses    <- newPred "uses" (Pred :: Sig ["person", "vehicle"])
+     sells <- newPred "sells" (Pred :: Sig '["place", "good"])
+     at    <- newPred "at"    (Pred :: Sig '["place"])
+     has   <- newPred "has"   (Pred :: Sig '["good"])
 
-     forM_ [car,bike] $ \ v ->
-       forM_ [me,you] $ \ p -> newAction $
-         do preCond (uses p v)
+     forM_ [supermarket,hardwareStore,home] $ \ a ->
+       forM_ [supermarket,hardwareStore,home] $ \ b -> newAction $
+         do preCond (at a)
+            effect  (negA (at a))
+            effect  (at b)
+            action  $ ("Going from `" ++ show a ++ "` to `" ++ show b ++ "`")
+
+     let buy x from = newAction $
+           do preCond (at from)
+              preCond (sells from x)
+              effect (has x)
+              action $ "Buy `" ++ show x ++ "` from " ++ show from
+
+     buy banana supermarket
+     mapM_ (`buy` hardwareStore) [hammer,drill]
+
+     assume (at home)
+     assume (sells supermarket   banana)
+     assume (sells hardwareStore drill)
+     goal   (has banana)
+     goal   (has drill)
+     goal   (at home)
+
+test2 =
+  do obj <- newType (Proxy :: Proxy "obj")
+     a   <- newObj "a" obj
+     b   <- newObj "b" obj
+     c   <- newObj "c" obj
+
+     isSet <- newPred "is-set" (Pred :: Sig '["obj"])
+
+     newAction $ do preCond (isSet a)
+                    effect  (isSet b)
+                    effect  (negA (isSet a))
+                    action  "step-1"
+
+     newAction $ do preCond (isSet b)
+                    effect  (isSet c)
+                    action  "step-2"
+
+     assume (isSet a)
+     goal   (isSet c)
