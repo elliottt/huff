@@ -15,7 +15,7 @@ import qualified Huff.Compile as I
 import qualified Huff.Input   as Input
 import qualified Huff.Planner as I
 
-import           Control.Monad (forM_)
+import           Control.Monad (forM_,unless,when)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe (mapMaybe)
 import           Data.Proxy (Proxy(..))
@@ -89,20 +89,21 @@ newType p = Huff $
   add Nothing     = Just Set.empty
 
 
-newtype Obj (ty :: Symbol) = Obj T.Text
+newtype Obj (ty :: Symbol) = Obj I.Arg
                              deriving (Show,Eq)
 
 newObj :: T.Text -> Type sym -> Huff step (Obj ty)
 newObj str (Type ty) = Huff $
   do RW { .. } <- get
      set RW { rwTypes = Map.alter add ty rwTypes, .. }
-     return (Obj str)
+     return (Obj (I.AName str))
   where
   add (Just objs) = Just (Set.insert str objs)
   add Nothing     = Just (Set.singleton str)
 
 objValue :: Obj ty -> T.Text
-objValue (Obj str) = str
+objValue (Obj (I.AName str)) = str
+objValue _                   = error "quantified variable escaped"
 
 
 -- Goal Descriptions -----------------------------------------------------------
@@ -111,9 +112,9 @@ class IsGD a where
   toGD :: a -> GD
 
 toTerm :: IsGD a => a -> I.Term
-toTerm a = unGD (toGD a)
+toTerm a = fst (runM (unGD (toGD a)) 0)
 
-newtype GD = GD { unGD :: I.Term }
+newtype GD = GD { unGD :: StateT Int Id I.Term }
 
 instance IsGD GD where
   toGD = id
@@ -124,27 +125,45 @@ goal gd = Huff $
      set RW { rwGoal = toTerm gd : rwGoal, .. }
 
 orGD :: IsGD a => [a] -> GD
-orGD gds = GD (I.mkTOr (map toTerm gds))
+orGD gds = GD (I.mkTOr `fmap` mapM (unGD . toGD) gds)
 
 andGD :: IsGD a => [a] -> GD
-andGD gds = GD (I.mkTAnd (map toTerm gds))
+andGD gds = GD (I.mkTAnd `fmap` mapM (unGD . toGD) gds)
 
 notGD :: IsGD a => a -> GD
-notGD gd = GD (I.TNot (toTerm gd))
+notGD gd = GD (I.TNot `fmap` unGD (toGD gd))
 
 (==>) :: (IsGD a, IsGD b) => a -> b -> GD
-a ==> b = GD (I.TImply (toTerm a) (toTerm b))
+a ==> b = GD (I.TImply <$> unGD (toGD a) <*> unGD (toGD b))
+
+exists :: Type sym -> (Obj sym -> GD) -> GD
+exists (Type ty) f = GD $
+  do i <- get
+     set $! i + 1
+     let var   = T.concat ["$exists-", ty, T.pack (show i)]
+         param = I.Typed var ty
+     let GD b = f (Obj (I.AVar var))
+     I.TExists [param] `fmap` b
+
+forAll :: Type sym -> (Obj sym -> GD) -> GD
+forAll (Type ty) f = GD $
+  do i <- get
+     set $! i + 1
+     let var   = T.concat ["$forall-", ty, T.pack (show i)]
+         param = I.Typed var ty
+     let GD b = f (Obj (I.AVar var))
+     I.TForall [param] `fmap` b
 
 
 -- | A fully applied predicate.
 newtype Atom = Atom { unAtom :: I.Literal }
 
-negA :: Atom -> Atom
-negA (Atom (I.LAtom a)) = Atom (I.LNot  a)
-negA (Atom (I.LNot  a)) = Atom (I.LAtom a)
+notA :: Atom -> Atom
+notA (Atom (I.LAtom a)) = Atom (I.LNot  a)
+notA (Atom (I.LNot  a)) = Atom (I.LAtom a)
 
 instance IsGD Atom where
-  toGD (Atom lit) = GD (I.TLit lit)
+  toGD (Atom lit) = GD (return (I.TLit lit))
 
 -- | Add an initial assumption.
 assume :: Atom -> Huff step ()
@@ -268,7 +287,7 @@ test =
      forM_ [supermarket,hardwareStore,home] $ \ a ->
        forM_ [supermarket,hardwareStore,home] $ \ b -> newAction $
          do preCond (at a)
-            effect  (negA (at a))
+            effect  (notA (at a))
             effect  (at b)
             action  $ ("Going from `" ++ show a ++ "` to `" ++ show b ++ "`")
 
@@ -298,7 +317,7 @@ test2 =
 
      newAction $ do preCond (isSet a)
                     effect  (isSet b)
-                    effect  (negA (isSet a))
+                    effect  (notA (isSet a))
                     action  "step-1"
 
      newAction $ do preCond (isSet b)
@@ -307,3 +326,44 @@ test2 =
 
      assume (isSet a)
      goal   (isSet c)
+
+test3 =
+  do obj   <- newType (Proxy :: Proxy "obj")
+     a     <- newObj "a" obj
+     b     <- newObj "b" obj
+     c     <- newObj "c" obj
+     table <- newObj "table" obj
+
+     on    <- newPred "on"    (Pred :: Sig  ["obj", "obj"])
+     clear <- newPred "clear" (Pred :: Sig '["obj"])
+     eq    <- newPred "eq"    (Pred :: Sig '["obj", "obj"])
+
+     -- define equality
+     mapM_ assume [ eq x x | x <- [a,b,c,table] ]
+
+     -- the stacking actions
+     forM_ [a,b,c]         $ \ x ->
+       forM_ [a,b,c,table] $ \ y ->
+       forM_ [a,b,c,table] $ \ z ->
+         when (x /= y && y /= z && z /= x) $
+         newAction $
+           do preCond (clear x)
+              preCond (clear z)
+              preCond (on x y)
+              effect  (on x z)
+              unless (y == table) (effect (clear y))
+              unless (z == table) (effect (notA (clear z)))
+              action $ T.unwords [ "move", objValue x
+                                 , "from", objValue y
+                                 , "to",   objValue z ]
+
+     -- setup the initial state
+     assume (clear a)
+     assume (on a table)
+     -- assume (clear b)
+     assume (on b table)
+     assume (clear c)
+     assume (on c b)
+     assume (clear table)
+
+     goal (andGD [ on b c, on c table ])
