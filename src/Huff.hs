@@ -269,7 +269,7 @@ newAction (Action body) = Huff $
 
 -- Tests -----------------------------------------------------------------------
 
-test =
+test1 =
   do place         <- newType (Proxy :: Proxy "place")
      supermarket   <- newObj "supermarket"    place
      hardwareStore <- newObj "hardware-store" place
@@ -289,13 +289,15 @@ test =
          do preCond (at a)
             effect  (notA (at a))
             effect  (at b)
-            action  $ ("Going from `" ++ show a ++ "` to `" ++ show b ++ "`")
+            action $ T.unwords [ "Going from", objValue  a
+                               , "to", objValue b ]
 
      let buy x from = newAction $
            do preCond (at from)
               preCond (sells from x)
               effect (has x)
-              action $ "Buy `" ++ show x ++ "` from " ++ show from
+              action $ T.unwords [ "Buy", objValue x
+                                 , "from", objValue from ]
 
      buy banana supermarket
      mapM_ (`buy` hardwareStore) [hammer,drill]
@@ -336,10 +338,6 @@ test3 =
 
      on    <- newPred "on"    (Pred :: Sig  ["obj", "obj"])
      clear <- newPred "clear" (Pred :: Sig '["obj"])
-     eq    <- newPred "eq"    (Pred :: Sig '["obj", "obj"])
-
-     -- define equality
-     mapM_ assume [ eq x x | x <- [a,b,c,table] ]
 
      -- the stacking actions
      forM_ [a,b,c]         $ \ x ->
@@ -366,4 +364,4 @@ test3 =
      assume (on c b)
      assume (clear table)
 
-     goal (andGD [ on b c, on c table ])
+     goal (andGD [ on a b, on b c, on c table ])
