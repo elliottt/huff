@@ -11,6 +11,7 @@ import qualified Huff.RefSet as RS
 import           Control.Monad ( foldM )
 import           Data.IORef ( readIORef, writeIORef )
 import           Data.Monoid ( mconcat )
+import           Data.Struct
 
 
 -- Predicates ------------------------------------------------------------------
@@ -45,8 +46,8 @@ allGoalsReached cg g = go goals
   goals     = RS.toList g
 
   -- require that all goals have a level that isn't infinity.
-  go (r:rs) = do Fact { .. } <- getFact cg r
-                 l <- readIORef fLevel
+  go (r:rs) = do fact <- getFact cg r
+                 l <- getField fLevel fact
                  if l < maxBound
                     then go rs
                     else return False
@@ -58,31 +59,32 @@ allGoalsReached cg g = go goals
 -- that were enabled by adding this fact.
 activateFact :: ConnGraph a -> Level -> FactRef -> IO Effects
 activateFact cg level ref =
-  do Fact { .. } <- getFact cg ref
-     writeIORef fLevel level
-
-     foldM addedPrecond RS.empty (RS.toList fPreCond)
+  do fact <- getFact cg ref
+     setField fLevel fact level
+     preCond <- getField fPreCond fact
+     foldM addedPrecond RS.empty (RS.toList preCond)
 
   where
 
   addedPrecond effs eff =
-    do Effect { .. } <- getEffect cg eff
+    do effect <- getEffect cg eff
 
        -- skip effects that are already activated
-       l <- readIORef eLevel
+       l <- getField eLevel effect
        if l < maxBound
           then return effs
-          else do pcs <- readIORef eActivePre
+          else do pcs <- getField eActivePre effect
                   let pcs' = pcs + 1
-                  writeIORef eActivePre $! pcs'
+                  setField eActivePre effect $! pcs'
 
-                  if pcs' >= eNumPre
+                  numPre <- getField eNumPre effect
+                  if pcs' >= numPre
                      then return (RS.insert eff effs)
                      else return effs
 
 -- | Add an effect at level i, and return all of its add effects.
 activateEffect :: ConnGraph a -> Level -> EffectRef -> IO Facts
 activateEffect cg level ref =
-  do Effect { .. } <- getEffect cg ref
-     writeIORef eLevel level
-     return eAdds
+  do effect <- getEffect cg ref
+     setField eLevel effect level
+     getField eAdds effect

@@ -2,7 +2,9 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ParallelListComp #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Huff.ConnGraph (
     ConnGraph()
@@ -11,8 +13,8 @@ module Huff.ConnGraph (
 
   , Key
 
-  , FactRef(),   Fact(..),   getFact
-  , EffectRef(), Effect(..), getEffect
+  , FactRef(),   Fact,   getFact , fProp , fLevel , fIsTrue , fIsGoal , fDirty , fPreCond , fAdd , fDel
+  , EffectRef(), Effect, getEffect , ePre , eAdds , eDels , eOp , eDirty , eInPlan , eIsInH , eNumPre , eLevel , eActivePre
 
   , Level
 
@@ -20,6 +22,8 @@ module Huff.ConnGraph (
   , Goals
   , Facts
   , Effects
+
+  , true, false
 
     -- * Debugging
   , printEffects, printEffect
@@ -30,12 +34,18 @@ import qualified Huff.Input as I
 import qualified Huff.RefSet as RS
 
 import           Control.Monad ( zipWithM, unless, (<=<) )
-import           Data.Array.IO
 import           Data.IORef
                      ( IORef, newIORef, readIORef, writeIORef, modifyIORef )
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
+
+import           Data.Struct
+import           Data.Struct.TH
+import           Data.Vector (Vector)
+import qualified Data.Vector as Vector
+import           Control.Monad.Primitive
+import           Data.Foldable (traverse_)
 
 
 -- Connection Graph ------------------------------------------------------------
@@ -47,57 +57,64 @@ type Effects = RS.RefSet EffectRef
 
 type Level   = Int
 
-data ConnGraph a = ConnGraph { cgFacts        :: !(IOArray FactRef Fact)
-                             , cgEffects      :: !(IOArray EffectRef (Effect a))
-                             , cgDirtyFacts   :: !(IORef [FactRef])
-                             , cgDirtyEffects :: !(IORef [EffectRef])
-                             }
-
-
 newtype FactRef = FactRef Int
-                  deriving (Show,Eq,Ord,Ix,Enum)
+                  deriving (Show,Eq,Ord,Enum)
 
 newtype EffectRef = EffectRef Int
-                    deriving (Show,Eq,Ord,Ix,Enum)
+                    deriving (Show,Eq,Ord,Enum)
 
+makeStruct [d|
 
-data Fact = Fact { fProp  :: !I.Fact
-                 , fLevel :: !(IORef Level)
+  data ConnGraph' a s0 s = ConnGraph'
+    { cgFacts        :: Vector (Fact' s0)
+    , cgEffects      :: Vector (Effect' a s0)
+    , cgDirtyFacts   :: [FactRef]
+    , cgDirtyEffects :: [EffectRef]
+    }
 
-                 , fIsTrue:: !(IORef Level)
-                 , fIsGoal:: !(IORef Bool)
+  data Fact' s = Fact'
+    { fProp  :: I.Fact
+    , fLevel :: {-# UNPACK #-} !Int -- Level
+    , fIsTrue:: {-# UNPACK #-} !Int -- Level
 
-                 , fDirty :: !(IORef Bool)
+    , fIsGoal:: {-# UNPACK #-} !Int -- Bool
+    , fDirty :: {-# UNPACK #-} !Int -- Bool
 
-                 , fPreCond :: !Effects
-                   -- ^ Effects that require this fact
-                 , fAdd   :: !Effects
-                   -- ^ Effects that add this fact
-                 , fDel   :: !Effects
-                   -- ^ Effects that delete this fact
-                 }
+    , fPreCond :: Effects
+      -- ^ Effects that require this fact
+    , fAdd   :: Effects
+      -- ^ Effects that add this fact
+    , fDel   :: Effects
+      -- ^ Effects that delete this fact
+    }
 
-data Effect a = Effect { ePre       :: !Facts
-                       , eNumPre    :: !Int
-                       , eAdds      :: !Facts
-                       , eDels      :: !Facts
-                       , eOp        :: !(I.Operator a)
-                         -- ^ The operator that this effect came from
+  data Effect' a s = Effect'
+    { ePre       :: Facts
+    , eAdds      :: Facts
+    , eDels      :: Facts
+    , eOp        :: I.Operator a
+      -- ^ The operator that this effect came from
 
-                       , eDirty     :: !(IORef Bool)
+    , eDirty     :: {-# UNPACK #-} !Int -- Bool
+    , eInPlan    :: {-# UNPACK #-} !Int -- Bool
+      -- ^ Whether or not this effect is a member of the
+      -- current relaxed plan
 
-                       , eInPlan    :: !(IORef Bool)
-                         -- ^ Whether or not this effect is a member of the
-                         -- current relaxed plan
+    , eIsInH     :: {-# UNPACK #-} !Int -- Bool
+      -- ^ If this action is part of the helpful action set
 
-                       , eIsInH     :: !(IORef Bool)
-                         -- ^ If this action is part of the helpful action set
+    , eNumPre    :: {-# UNPACK #-} !Int
+    , eLevel     :: {-# UNPACK #-} !Int -- Level
+      -- ^ Membership level for this effect
+    , eActivePre :: {-# UNPACK #-} !Int -- Level
+      -- ^ Active preconditions for this effect
+    }
 
-                       , eLevel     :: !(IORef Level)
-                         -- ^ Membership level for this effect
-                       , eActivePre :: !(IORef Level)
-                         -- ^ Active preconditions for this effect
-                       }
+  type Effect a  = Effect' a  (PrimState IO)
+  type Fact      = Fact'      (PrimState IO)
+  type ConnGraph a = ConnGraph' a (PrimState IO) (PrimState IO)
+
+  |]
 
 
 instance RS.Ref FactRef where
@@ -114,8 +131,11 @@ instance RS.Ref EffectRef where
 -- | Apply an effect to the state given, returning a new state.
 applyEffect :: ConnGraph a -> EffectRef -> State -> IO State
 applyEffect cg ref s =
-  do Effect { .. } <- readArray (cgEffects cg) ref
-     return $! (s RS.\\ eDels) `RS.union` eAdds
+  do effects <- getField cgEffects cg
+     effect <- Vector.indexM effects (fromEnum ref)
+     adds <- getField eAdds effect
+     dels <- getField eDels effect
+     return $! (s RS.\\ dels) `RS.union` adds
 
 
 -- Input Processing ------------------------------------------------------------
@@ -129,16 +149,10 @@ buildConnGraph :: I.Domain a -> I.Problem -> IO (State,Goals,ConnGraph a)
 buildConnGraph dom prob =
   do emptyFact <- mkFact (I.Fact "<empty>" [])
      facts     <- mapM mkFact allFacts
-     cgFacts   <- newListArray (FactRef 0, FactRef (length facts))
-                      (emptyFact : facts)
-
-     effs      <- zipWithM (mkEffect cgFacts) (map EffectRef [0 ..]) allEffs
-     cgEffects <- newListArray (EffectRef 0, EffectRef (length effs - 1)) effs
-
-     cgDirtyFacts   <- newIORef []
-     cgDirtyEffects <- newIORef []
-
-     return (RS.insert (FactRef 0) state,goal,ConnGraph { .. })
+     let facts' = Vector.fromList (emptyFact:facts)
+     effs      <- zipWithM (mkEffect facts') (map EffectRef [0 ..]) allEffs
+     cg <- newConnGraph' facts' (Vector.fromList effs) [] []
+     return (RS.insert (FactRef 0) state,goal,cg)
 
   where
   -- translated goal and initial state
@@ -151,80 +165,82 @@ buildConnGraph dom prob =
 
   -- all ground effects, extended with the preconditions from their operators
   allEffs = [ (op, eff) | op  <- I.domOperators dom, eff <- I.expandEffects op ]
-  mkFact fProp =
-    do fLevel  <- newIORef maxBound
-       fIsTrue <- newIORef 0
-       fIsGoal <- newIORef False
-       fDirty  <- newIORef False
-       return Fact { fPreCond = RS.empty
-                   , fAdd     = RS.empty
-                   , fDel     = RS.empty
-                   , .. }
+  mkFact prop = newFact'
+     prop
+     maxBound -- fLevel
+     0 -- fIsTrue
+
+     false -- fIsGoal
+     false -- fDirty
+
+     RS.empty -- fPreCond
+     RS.empty -- fAdd
+     RS.empty -- fDel
 
   mkEffect facts ix (op,e) =
-    do eLevel     <- newIORef maxBound
-       eActivePre <- newIORef 0
-       eInPlan    <- newIORef False
-       eIsInH     <- newIORef False
-
-       eDirty     <- newIORef False
-
-       let refs fs = RS.fromList (map (factRefs Map.!) fs)
+    do let refs fs = RS.fromList (map (factRefs Map.!) fs)
 
            -- when the preconditions for this fact are empty, make it reference
            -- special fact 0, which represents the empty state.
-           ePre | null (I.ePre e) = RS.singleton (FactRef 0)
-                | otherwise       = refs (I.ePre e)
+           pre | null (I.ePre e) = RS.singleton (FactRef 0)
+               | otherwise       = refs (I.ePre e)
 
-           eff     =  Effect { eNumPre = length (I.ePre e)
-                             , eAdds   = refs (I.eAdd e)
-                             , eDels   = refs (I.eDel e)
-                             , eOp     = op
-                             , .. }
+           adds = refs (I.eAdd e)
+           dels = refs (I.eDel e)
 
-       mapM_ pre (RS.toList  ePre)
-       mapM_ add (RS.toList (eAdds eff))
-       mapM_ del (RS.toList (eDels eff))
+       eff <- newEffect' pre adds dels
+                  op false false false (length (I.ePre e)) maxBound 0
+
+       mapM_ dopre (RS.toList pre)
+       mapM_ add (RS.toList adds)
+       mapM_ del (RS.toList dels)
 
        return eff
 
     where
-    pre ref =
-      do Fact { .. } <- readArray facts ref
-         writeArray facts ref Fact { fPreCond = RS.insert ix fPreCond, .. }
+    dopre ref =
+      do fact  <- Vector.indexM facts (fromEnum ref)
+         modifyField fPreCond fact (RS.insert ix)
 
     add ref =
-      do Fact { .. } <- readArray facts ref
-         writeArray facts ref Fact { fAdd = RS.insert ix fAdd, .. }
+      do fact <- Vector.indexM facts (fromEnum ref)
+         modifyField fAdd fact (RS.insert ix)
 
     del ref =
-      do Fact { .. } <- readArray facts ref
-         writeArray facts ref Fact { fDel = RS.insert ix fDel, .. }
+      do fact <- Vector.indexM facts (fromEnum ref)
+         modifyField fDel fact (RS.insert ix)
 
 
 -- Graph Interaction -----------------------------------------------------------
 
 type family Key node :: * where
-  Key Fact       = FactRef
-  Key (Effect a) = EffectRef
+  Key (Fact' s)  = FactRef
+  Key (Effect' a s) = EffectRef
 
 getFact :: ConnGraph a -> FactRef -> IO Fact
-getFact ConnGraph { .. } ref =
-  do fact @ Fact { .. } <- readArray cgFacts ref
-     isDirty            <- readIORef fDirty
+getFact cg ref =
+  do facts <- getField cgFacts cg
+     fact <- Vector.indexM facts (fromEnum ref)
+     isDirty <- (0/=) <$> getField fDirty fact
      unless isDirty $
-       do writeIORef fDirty True
-          modifyIORef cgDirtyFacts (ref :)
+       do setField fDirty fact true
+          modifyField cgDirtyFacts cg (ref :)
      return fact
 
 getEffect :: ConnGraph a -> EffectRef -> IO (Effect a)
-getEffect ConnGraph { .. } ref =
-  do eff @ Effect { .. } <- readArray cgEffects ref
-     isDirty             <- readIORef eDirty
+getEffect connGraph ref =
+  do v <- getField cgEffects connGraph
+     eff <- Vector.indexM v (fromEnum ref)
+     isDirty <- (0/=) <$> getField eDirty eff
      unless isDirty $
-       do writeIORef eDirty True
-          modifyIORef cgDirtyEffects (ref :)
+       do setField eDirty eff true
+          modifyField cgDirtyEffects connGraph (ref :)
      return eff
+
+
+modifyField :: (Struct o, PrimMonad m) => Field o a -> o (PrimState m) -> (a -> a) -> m ()
+modifyField s = \o f -> setField s o . f =<< getField s o
+{-# INLINE modifyField #-}
 
 
 -- Resetting -------------------------------------------------------------------
@@ -232,72 +248,76 @@ getEffect ConnGraph { .. } ref =
 -- | Reset dirty references in the plan graph to their initial state.
 resetConnGraph :: ConnGraph a -> IO ()
 resetConnGraph cg =
-  do mapM_ (resetFact   <=< getFact   cg) =<< readIORef (cgDirtyFacts   cg)
-     mapM_ (resetEffect <=< getEffect cg) =<< readIORef (cgDirtyEffects cg)
-     writeIORef (cgDirtyFacts   cg) []
-     writeIORef (cgDirtyEffects cg) []
+  do mapM_ (resetFact   <=< getFact   cg) =<< getField cgDirtyFacts   cg
+     mapM_ (resetEffect <=< getEffect cg) =<< getField cgDirtyEffects cg
+     setField cgDirtyFacts   cg []
+     setField cgDirtyEffects cg []
 
 resetFact :: Fact -> IO ()
-resetFact Fact { .. } =
-  do writeIORef fLevel maxBound
-     writeIORef fIsTrue 0
-     writeIORef fIsGoal False
-     writeIORef fDirty False
+resetFact fact =
+  do setField fLevel fact maxBound
+     setField fIsTrue fact 0
+     setField fIsGoal fact false
+     setField fDirty fact false
 
 resetEffect :: Effect a -> IO ()
-resetEffect Effect { .. } =
-  do writeIORef eLevel maxBound
-     writeIORef eActivePre 0
-     writeIORef eInPlan False
-     writeIORef eIsInH False
-     writeIORef eDirty False
+resetEffect effect =
+  do setField eLevel effect maxBound
+     setField eActivePre effect 0
+     setField eInPlan effect false
+     setField eIsInH effect false
+     setField eDirty effect false
 
+false = 0 :: Int
+true  = 1 :: Int
 
 -- Utilities -------------------------------------------------------------------
 
 printFacts :: ConnGraph a -> IO ()
-printFacts ConnGraph { .. } = amapWithKeyM_ printFact cgFacts
+printFacts connGraph =
+  do facts <- getField cgFacts connGraph
+     amapWithKeyM_ printFact facts
 
 printFact :: FactRef -> Fact -> IO ()
-printFact ref Fact { .. } =
-  do putStrLn ("Fact: (" ++ show ref ++ ") " ++ show fProp)
+printFact ref fact =
+  do prop <- getField fProp fact
+     putStrLn ("Fact: (" ++ show ref ++ ") " ++ show prop)
 
-     lev    <- readIORef fLevel
-     isTrue <- readIORef fIsTrue
-     isGoal <- readIORef fIsGoal
+     lev     <- getField fLevel fact
+     isTrue  <- (/=0) <$> getField fIsTrue fact
+     isGoal  <- (/=0) <$> getField fIsGoal fact
+     add     <- getField fAdd fact
+     del     <- getField fDel fact
+     preCond <- getField fPreCond fact
 
      putStr $ unlines
        [ "  level:      " ++ show lev
        , "  is true:    " ++ show isTrue
        , "  is goal:    " ++ show isGoal
-       , "  required by:" ++ show fPreCond
-       , "  added by:   " ++ show fAdd
-       , "  deleted by: " ++ show fDel
+       , "  required by:" ++ show preCond
+       , "  added by:   " ++ show add
+       , "  deleted by: " ++ show del
        ]
 
 printEffects :: ConnGraph a -> IO ()
-printEffects cg = amapWithKeyM_ printEffect (cgEffects cg)
+printEffects cg = amapWithKeyM_ printEffect =<< getField cgEffects cg
 
 printEffect :: EffectRef -> Effect a -> IO ()
-printEffect ref Effect { .. } =
-  do let I.Operator { .. } = eOp
+printEffect ref effect =
+  do I.Operator { .. } <- getField eOp effect
      putStrLn ("Effect (" ++ show ref ++ ") " ++ T.unpack opName)
 
-     lev <- readIORef eLevel
+     lev <- getField eLevel effect
+     pre <- getField ePre effect
+     adds <- getField eAdds effect
+     dels <- getField eDels effect
 
      putStr $ unlines
        [ " level:    " ++ show lev
-       , " requires: " ++ show ePre
-       , " adds:     " ++ show eAdds
-       , " dels:     " ++ show eDels
+       , " requires: " ++ show pre
+       , " adds:     " ++ show adds
+       , " dels:     " ++ show dels
        ]
 
-amapWithKeyM_ :: (Enum i, Ix i) => (i -> e -> IO ()) -> IOArray i e -> IO ()
-amapWithKeyM_ f arr =
-  do (lo,hi) <- getBounds arr
-
-     let go i | i > hi    =    return ()
-              | otherwise = do f i =<< readArray arr i
-                               go (succ i)
-
-     go lo
+amapWithKeyM_ :: Enum i => (i -> e -> IO ()) -> Vector e -> IO ()
+amapWithKeyM_ f arr = traverse_ (\(i,x) -> f (toEnum i) x) (Vector.indexed arr)

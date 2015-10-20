@@ -8,10 +8,10 @@ import           Huff.ConnGraph
 import qualified Huff.RefSet as RS
 
 import           Control.Monad ( foldM, filterM, guard )
-import           Data.IORef ( readIORef, writeIORef )
 import qualified Data.IntMap.Strict as IM
 import           Data.Maybe ( isNothing )
 import           Data.Monoid ( mappend )
+import           Data.Struct
 
 
 -- | A map from fact level to the goals that appear there.
@@ -28,12 +28,12 @@ goalSet :: ConnGraph a -> Goals -> IO (Maybe (Level,GoalSet))
 goalSet cg goals = go 0 IM.empty (RS.toList goals)
   where
   go !m !gs (g:rest) =
-    do Fact { .. } <- getFact cg g
-       i <- readIORef fLevel
+    do fact <- getFact cg g
+       i <- getField fLevel fact
 
        if i == maxBound
           then return Nothing
-          else do writeIORef fIsGoal True
+          else do setField fIsGoal fact true
                   go (max m i) (IM.insertWith mappend i (RS.singleton g) gs) rest
 
   go !m !gs [] = return (Just (m,gs))
@@ -43,14 +43,15 @@ goalSet cg goals = go 0 IM.empty (RS.toList goals)
 -- effect's preconditions appears.
 difficulty :: ConnGraph a -> EffectRef -> IO Level
 difficulty cg e =
-  do Effect { .. } <- getEffect cg e
-     if RS.null ePre
+  do effect <- getEffect cg e
+     pre <- getField ePre effect
+     if RS.null pre
         then return 0
-        else foldM minPrecondLevel maxBound (RS.toList ePre)
+        else foldM minPrecondLevel maxBound (RS.toList pre)
   where
   minPrecondLevel l ref =
-    do Fact { .. } <- getFact cg ref
-       l' <- readIORef fLevel
+    do fact <- getFact cg ref
+       l' <- getField fLevel fact
        return $! min l l'
 
 -- | Extract a plan from a fixed connection graph.
@@ -76,27 +77,30 @@ extractPlan cg goals0 =
          return (Just (plan,gs))
 
   solveGoal level acc@(plan,gs) g =
-    do Fact { .. } <- getFact cg g
+    do fact <- getFact cg g
 
        -- the goal was solved by something else at this level
-       isTrue <- readIORef fIsTrue
+       isTrue <- getField fIsTrue fact
        if isTrue == level
           then return acc
-          else do e             <- pickBest (level - 1) (RS.toList fAdd)
-                  Effect { .. } <- getEffect cg e
-                  writeIORef eInPlan True
-                  gs'           <- foldM (filterGoals level) gs (RS.toList ePre)
-                  mapM_ (markAdd level) (RS.toList eAdds)
+          else do add <- getField fAdd fact
+                  e             <- pickBest (level - 1) (RS.toList add)
+                  effect        <- getEffect cg e
+                  setField eInPlan effect true
+                  pre <- getField ePre effect
+                  gs'           <- foldM (filterGoals level) gs (RS.toList pre)
+                  adds <- getField eAdds effect
+                  mapM_ (markAdd level) (RS.toList adds)
                   let plan' = 1 + plan
                   plan' `seq` return (plan',gs')
 
   -- insert goals into the goal set for the level where they become true
   filterGoals level gs f =
-    do Fact { .. } <- getFact cg f
+    do fact <- getFact cg f
 
-       isTrue <- readIORef fIsTrue
-       isGoal <- readIORef fIsGoal
-       l      <- readIORef fLevel
+       isTrue <- getField fIsTrue fact
+       isGoal <- (0/=) <$> getField fIsGoal fact
+       l      <- getField fLevel fact
 
        let existingGoal =
              or [ isTrue == level
@@ -109,14 +113,14 @@ extractPlan cg goals0 =
 
        if existingGoal
           then    return gs
-          else do writeIORef fIsGoal True
+          else do setField fIsGoal fact true
                   return (IM.insertWith mappend l (RS.singleton f) gs)
 
 
   -- mark the fact as being added at level i
   markAdd i f =
-    do Fact { .. } <- getFact cg f
-       writeIORef fIsTrue i
+    do fact <- getFact cg f
+       setField fIsTrue fact i
 
 
   -- pick the best effect that achieved this goal in the given layer, using the
@@ -126,8 +130,8 @@ extractPlan cg goals0 =
   pickBest level es = snd `fmap` foldM check (maxBound,error "pickBest") es
     where
     check acc@(d,_) r =
-      do Effect { .. } <- getEffect cg r
-         l <- readIORef eLevel
+      do effect <- getEffect cg r
+         l <- getField eLevel effect
          if level /= l
             then return acc
             else do d' <- difficulty cg r
@@ -143,12 +147,13 @@ allActions :: ConnGraph a -> State -> IO Effects
 allActions cg s = foldM enabledEffects RS.empty (RS.toList s)
   where
   enabledEffects effs ref =
-    do Fact { .. } <- getFact cg ref
-       foldM checkEffect effs (RS.toList fPreCond)
+    do fact <- getFact cg ref
+       preCond <- getField fPreCond fact
+       foldM checkEffect effs (RS.toList preCond)
 
   checkEffect effs ref =
-    do Effect { .. } <- getEffect cg ref
-       l <- readIORef eLevel
+    do effect <- getEffect cg ref
+       l <- getField eLevel effect
        if l == 0
           then return $! RS.insert ref effs
           else return effs
@@ -161,9 +166,10 @@ helpfulActions cg refs goals
   | otherwise     = filterM isHelpful (RS.toList refs)
   where
   isHelpful ref =
-    do Effect { .. } <- getEffect cg ref
-       inPlan        <- readIORef eInPlan
-       return (inPlan && not (RS.null (RS.intersection goals eAdds)))
+    do effect <- getEffect cg ref
+       inPlan <- (0/=) <$> getField eInPlan effect
+       adds <- getField eAdds effect
+       return (inPlan && not (RS.null (RS.intersection goals adds)))
 
 
 -- Added Goal Deletion ---------------------------------------------------------
@@ -174,8 +180,9 @@ addedGoalDeletion :: ConnGraph a -> Goals -> IO Bool
 addedGoalDeletion cg goals = go RS.empty (RS.toList goals)
   where
   go seen (ref : gs) =
-    do Fact { .. } <- getFact cg ref
-       (seen',mb)  <- foldM checkDels (seen,Just RS.empty) (RS.toList fAdd)
+    do fact <- getFact cg ref
+       add <- getField fAdd fact
+       (seen',mb)  <- foldM checkDels (seen,Just RS.empty) (RS.toList add)
        case mb of
          Just gs' -> go seen' (RS.toList gs' ++ gs)
          Nothing  -> return True
@@ -188,15 +195,17 @@ addedGoalDeletion cg goals = go RS.empty (RS.toList goals)
          return acc
 
     | otherwise =
-      do Effect { .. } <- getEffect cg ref
+      do effect <- getEffect cg ref
 
-         inPlan <- readIORef eInPlan
+         inPlan <- (0/=) <$> getField eInPlan effect
+         pre    <- getField ePre  effect
+         dels   <- getField eDels effect
 
          let next'
                | inPlan =
-                 do guard (RS.null (goals `RS.intersection` eDels))
+                 do guard (RS.null (goals `RS.intersection` dels))
                     facts <- next
-                    return (ePre `RS.union` facts)
+                    return (pre `RS.union` facts)
 
                | otherwise =
                     next

@@ -34,6 +34,9 @@ library
                        unordered-containers,
                        text,
                        array,
+                       primitive,
+                       vector,
+                       structs,
                        monadLib
 
   hs-source-dirs:      src

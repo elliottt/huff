@@ -21,6 +21,7 @@ import qualified Data.IntMap.Strict as IM
 import           Data.List ( sortBy )
 import           Data.Maybe ( isJust, fromMaybe, catMaybes )
 import           Data.Ord ( comparing )
+import           Data.Struct
 
 
 type Plan a = Result (I.Operator a)
@@ -52,8 +53,8 @@ findPlan prob dom =
   mkPlan _  _ Nothing     = return Nothing
 
   getOper cg eref =
-    do Effect { .. } <- getEffect cg eref
-       return eOp
+    do effect <- getEffect cg eref
+       getField eOp effect
 
 
 -- Enforced Hill Climbing ------------------------------------------------------
