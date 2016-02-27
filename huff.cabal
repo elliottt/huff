@@ -25,7 +25,6 @@ library
                        Huff.Fixpoint
                        Huff.Input
                        Huff.Planner
-                       Huff.RefSet
 
   build-depends:       base >=4.7 && <5,
                        containers,
@@ -33,7 +32,6 @@ library
                        hashable,
                        unordered-containers,
                        text,
-                       array,
                        monadLib
 
   hs-source-dirs:      src
