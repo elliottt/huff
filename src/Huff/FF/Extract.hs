@@ -2,7 +2,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiWayIf #-}
 
-module Huff.Extract where
+module Huff.FF.Extract where
 
 import           Huff.ConnGraph
 

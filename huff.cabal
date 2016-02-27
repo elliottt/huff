@@ -21,10 +21,10 @@ library
                        Huff.Compile.Operators
                        Huff.Compile.Problem
                        Huff.ConnGraph
-                       Huff.Extract
-                       Huff.Fixpoint
+                       Huff.FF.Extract
+                       Huff.FF.Fixpoint
+                       Huff.FF.Planner
                        Huff.Input
-                       Huff.Planner
 
   build-depends:       base >=4.7 && <5,
                        containers,
@@ -32,7 +32,8 @@ library
                        hashable,
                        unordered-containers,
                        text,
-                       monadLib
+                       monadLib,
+                       simple-smt
 
   hs-source-dirs:      src
   default-language:    Haskell2010

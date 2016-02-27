@@ -12,8 +12,8 @@
 module Huff where
 
 import qualified Huff.Compile as I
-import qualified Huff.Input   as Input
-import qualified Huff.Planner as I
+import qualified Huff.Input as Input
+import qualified Huff.FF.Planner as I
 
 import           Control.Monad (forM_,unless,when)
 import qualified Data.Map.Strict as Map

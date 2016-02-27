@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Huff.Fixpoint (
+module Huff.FF.Fixpoint (
     buildFixpoint
   ) where
 

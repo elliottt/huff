@@ -1,13 +1,14 @@
 {-# LANGUAGE RecordWildCards #-}
-module Huff.Planner (
+module Huff.FF.Planner (
     Plan, Result(..), resSteps,
     findPlan
   ) where
 
 import           Huff.ConnGraph
-import           Huff.Extract ( extractPlan, allActions, helpfulActions
-                              , addedGoalDeletion )
-import           Huff.Fixpoint
+import           Huff.FF.Extract
+                     ( extractPlan, allActions, helpfulActions
+                     , addedGoalDeletion )
+import           Huff.FF.Fixpoint
 import qualified Huff.Input as I
 
 import           Control.Monad ( unless )
