@@ -25,6 +25,87 @@ import           GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import           MonadLib (StateT,get,set,runM,Id)
 
 
+[huff|
+
+domain blocksWorld {
+
+  type object = table | a | b | c
+
+  predicate on(object, object), clear(object)
+
+  operator stack-on-table(x) {
+    value: $("Stack " ++ show x ++ " on table")
+    requires: clear(x)
+    effect: on(x,table)
+  }
+
+  operator stack(x : object, y : object) {
+    value: $("Stack " ++ show x ++ " on " ++ show y)
+    requires: clear(x), clear(y), not(is-table(y))
+    effect: on(x,y), not(clear(y))
+  }
+
+}
+
+problem blocksWorld1 {
+  domain:
+    blocksWorld
+
+  init:
+    on(a,b)
+    on(b,table)
+    on(c,table)
+    clear(c)
+    clear(a)
+
+  goal:
+    on(a,b)
+    on(b,c)
+    on(c,table)
+    clear(a)
+}
+
+domain shopping {
+
+  type place = supermarket    as "Supermarket"
+             | hardware-store as "Hardware Store"
+             | home           as "Home"
+
+  type good  = hammer
+             | drill
+             | banana
+
+  predicate at(place), sells(place,good), has(good)
+
+  operator going(from : place, to : place) {
+    value: $("Going from " ++ show from ++ " to " ++ show to ++ ".")
+    requires: at(from)
+    effect: not(at(from)), at(to)
+  }
+
+  operator buy(thing : good, from : place)
+    value: $("Buying " ++ show thing ++ " from " ++ show from ++ ".")
+    requires: at(from), sells(from,thing)
+    effect: has(thing)
+
+}
+
+problem buyHammerAndBanana {
+
+  domain shopping
+
+  init
+    at(home)
+
+  goal
+    at(home), has(hammer), has(banana)
+
+}
+
+
+|]
+
+
 newtype Huff step a = Huff { unHuff :: StateT (RW step) Id a
                            } deriving (Functor,Applicative,Monad)
 

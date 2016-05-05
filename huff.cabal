@@ -25,6 +25,9 @@ library
                        Huff.FF.Fixpoint
                        Huff.FF.Planner
                        Huff.Input
+                       Huff.QQ.Lexer
+
+  build-tools:         alex
 
   build-depends:       base >=4.7 && <5,
                        containers,
@@ -33,7 +36,9 @@ library
                        unordered-containers,
                        text,
                        monadLib,
-                       simple-smt
+                       simple-smt,
+                       array,
+                       located
 
   hs-source-dirs:      src
   default-language:    Haskell2010
