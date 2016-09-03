@@ -10,6 +10,10 @@ import           Data.Monoid (Monoid(..))
 import qualified Data.Text as T
 
 
+data Decl a = DDomain (Domain a)
+            | DProblem Problem
+              deriving (Show)
+
 data Domain a = Domain { domOperators :: [Operator a]
                        } deriving (Show)
 

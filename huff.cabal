@@ -26,10 +26,12 @@ library
                        Huff.FF.Planner
                        Huff.Input
                        Huff.QQ.Lexer
+                       Huff.QQ.Parser
 
   build-tools:         alex
 
   build-depends:       base >=4.7 && <5,
+                       alex-tools,
                        containers,
                        heaps,
                        hashable,
@@ -37,8 +39,7 @@ library
                        text,
                        monadLib,
                        simple-smt,
-                       array,
-                       located
+                       array
 
   hs-source-dirs:      src
   default-language:    Haskell2010
