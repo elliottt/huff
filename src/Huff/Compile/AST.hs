@@ -14,13 +14,14 @@ data Decl a = DDomain (Domain a)
             | DProblem Problem
               deriving (Show)
 
-data Domain a = Domain { domOperators :: [Operator a]
+data Domain a = Domain { domName      :: T.Text
+                       , domObjects   :: [Object]
+                       , domPreds     :: [Pred]
+                       , domOperators :: [Operator a]
                        } deriving (Show)
 
-data Problem = Problem { probObjects:: [Object]
-                       , probPreds  :: [Pred]
-                       , probInit   :: [Literal]
-                       , probGoal   :: Term
+data Problem = Problem { probInit :: [Literal]
+                       , probGoal :: Term
                        } deriving (Show)
 
 data Operator a = Operator { opName    :: !T.Text

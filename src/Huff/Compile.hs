@@ -20,7 +20,7 @@ compile :: Problem -> Domain a -> (I.Problem,I.Domain (Operator a))
 compile prob dom = ( transProblem prob''
                    , transDomain dom { domOperators = ops' } )
   where
-  types = typeMap (probObjects prob)
+  types = typeMap (domObjects dom)
 
   (prob',goalOp) = genProblemOperators prob
 
