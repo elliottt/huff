@@ -40,17 +40,21 @@ $white+ ;
 ")"         { keyword K_rparen    }
 "="         { keyword K_assign    }
 "|"         { keyword K_pipe      }
+","         { keyword K_comma     }
+":"         { keyword K_colon     }
+"!"         { keyword K_not       }
 "domain"    { keyword K_domain    }
-"type"      { keyword K_type      }
 "predicate" { keyword K_predicate }
 "operator"  { keyword K_operator  }
-"type"      { keyword K_type      }
+"requires"  { keyword K_requires  }
+"effect"    { keyword K_effect    }
+"object"    { keyword K_object    }
 "problem"   { keyword K_problem   }
 
 @ident      { matchText >>= \t -> lexeme (TIdent    t) }
 @conident   { matchText >>= \t -> lexeme (TConIdent t) }
 
-.       { lexeme TError }
+.           { lexeme TError }
 
 }
 
@@ -65,9 +69,11 @@ data Token = TKeyword  !Keyword
              deriving (Show)
 
 data Keyword = K_domain
-             | K_type
+             | K_object
              | K_predicate
              | K_operator
+             | K_requires
+             | K_effect
 
              | K_lbrace
              | K_rbrace
@@ -76,6 +82,9 @@ data Keyword = K_domain
 
              | K_assign
              | K_pipe
+             | K_comma
+             | K_colon
+             | K_not
 
              | K_problem
                deriving (Show)

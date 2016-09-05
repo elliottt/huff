@@ -20,26 +20,26 @@ import           MonadLib (StateT,get,set,runM,Id)
 [huff|
 
   domain BlocksWorld {
-    type Object = Table | A | B | C
-  }
 
-|]
-  
-{-
-    predicate isTable(Object)
-    predicate on     (Object, Object)
-    predicate clear  (Object)
-  
-    operator StackOnTable(x) {
+    object Object = Table | A | B | C
+
+    predicate isTable(Object), on(Object, Object), clear(Object)
+
+    operator StackOnTable(x:Object) {
       requires: clear(x)
       effect:   on(x,Table)
     }
-  
+
     operator Stack(x : Object, y : Object) {
       requires: clear(x), clear(y), !isTable(y)
       effect:   on(x,y), !clear(y)
     }
   
+  }
+
+|]
+
+{-
   }
   
   problem blocksWorld1 {
