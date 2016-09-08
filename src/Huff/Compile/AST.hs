@@ -1,6 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
 
 module Huff.Compile.AST where
 
@@ -9,10 +13,6 @@ import qualified Data.Map.Strict as Map
 import           Data.Monoid (Monoid(..))
 import qualified Data.Text as T
 
-
-data Decl a = DDomain (Domain a)
-            | DProblem Problem
-              deriving (Show)
 
 data Domain a = Domain { domName      :: T.Text
                        , domObjects   :: [Object]
@@ -30,7 +30,7 @@ data Operator a = Operator { opName    :: !T.Text
                            , opVal     :: Maybe a
                            , opPrecond :: Term
                            , opEffects :: Effect
-                           } deriving (Show)
+                           } deriving (Show,Functor,Foldable,Traversable)
 
 type Name = T.Text
 
@@ -113,6 +113,9 @@ data App a = App !Name [a]
 type Atom = App Arg
 
 pattern Atom n as = App n as
+
+negAtom :: Atom -> Atom
+negAtom (Atom a as) = Atom (T.append "$not-" a) as
 
 type Pred = App Type
 

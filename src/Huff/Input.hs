@@ -8,6 +8,8 @@ import           Data.String ( IsString(..) )
 import qualified Data.Text as T
 
 
+type Spec a = (Problem,Domain a)
+
 data Problem = Problem { probInit :: [Fact]
                        , probGoal :: [Fact]
                        } deriving (Show)
@@ -20,7 +22,7 @@ newtype Domain a = Domain { domOperators :: [Operator a]
 data Operator a = Operator { opName    :: !T.Text
                            , opPre     :: [Fact]
                            , opEffects :: [Effect]
-                           , opVal     :: a
+                           , opVal     :: Maybe a
                            } deriving (Show)
 
 -- | Effects, optionally guarded by additional conditions.

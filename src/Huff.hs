@@ -1,20 +1,52 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module Huff where
+module Huff (
+    huff,
+    Spec,
+    Domain(),
+    Problem(),
+    Literal(),
+    Term(),
+    module Huff
+  ) where
 
-import qualified Huff.Compile as I
-import qualified Huff.Input as Input
+import           Huff.Compile.AST (Problem,Term(..),Literal(..))
+import           Huff.Input (Spec,Domain,Operator(..))
 import           Huff.QQ (huff)
-import qualified Huff.FF.Planner as I
+import qualified Huff.FF.Planner as FF
 
-import           Control.Monad (forM_,unless,when)
-import qualified Data.Map.Strict as Map
-import           Data.Maybe (mapMaybe)
-import           Data.Proxy (Proxy(..))
-import qualified Data.Set as Set
-import qualified Data.Text as T
-import           GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
-import           MonadLib (StateT,get,set,runM,Id)
+import Data.Maybe (mapMaybe)
+
+infixr 3 /\
+
+(/\) :: Term -> Term -> Term
+p /\ q = TAnd [p,q]
+
+infixr 4 \/
+
+(\/) :: Term -> Term -> Term
+p \/ q = TOr [p,q]
+
+imply :: Term -> Term -> Term
+imply  = TImply
+
+class Has_neg a where
+  neg :: a -> a
+
+instance Has_neg Literal where
+  neg (LAtom a) = LNot  a
+  neg (LNot a)  = LAtom a
+
+instance Has_neg Term where
+  neg = TNot
+
+
+findPlan :: Spec a -> IO (Maybe [a])
+findPlan (prob,dom) =
+  do mb <- FF.findPlan prob dom
+     case mb of
+       Just xs -> return (Just (mapMaybe opVal (FF.resSteps xs)))
+       Nothing -> return Nothing
 
 
 [huff|
@@ -25,78 +57,16 @@ import           MonadLib (StateT,get,set,runM,Id)
 
     predicate isTable(Object), on(Object, Object), clear(Object)
 
-    operator StackOnTable(x:Object) {
-      requires: clear(x)
-      effect:   on(x,Table)
+    operator MoveToTable(b: Object,x: Object) {
+      requires: on(b,x), clear(b)
+      effect:   on(b,Table), clear(x)
     }
 
-    operator Stack(x : Object, y : Object) {
-      requires: clear(x), clear(y), !isTable(y)
-      effect:   on(x,y), !clear(y)
+    operator Move(b: Object, x: Object, y: Object) {
+      requires: on(b,x), clear(b), clear(y)
+      effect: on(b,y), clear(x), !clear(y)
     }
   
   }
 
 |]
-
-{-
-  }
-  
-  problem blocksWorld1 {
-    domain:
-      blocksWorld
-  
-    init:
-      on(a,b),
-      on(b,table),
-      on(c,table),
-      clear(c),
-      clear(a)
-  
-    goal:
-      on(a,b),
-      on(b,c),
-      on(c,table),
-      clear(a)
-  }
-  
-  domain shopping {
-  
-    type place = supermarket    as "Supermarket"
-               | hardware-store as "Hardware Store"
-               | home           as "Home"
-  
-    type good  = hammer
-               | drill
-               | banana
-  
-    predicate at(place), sells(place,good), has(good)
-  
-    operator going(from : place, to : place) {
-      value: $("Going from " ++ show from ++ " to " ++ show to ++ ".")
-      requires: at(from)
-      effect: not(at(from)), at(to)
-    }
-  
-    operator buy(thing : good, from : place)
-      value: $("Buying " ++ show thing ++ " from " ++ show from ++ ".")
-      requires: at(from), sells(from,thing)
-      effect: has(thing)
-  
-  }
-  
-  problem buyHammerAndBanana {
-  
-    domain shopping
-  
-    init
-      at(home)
-  
-    goal
-      at(home), has(hammer), has(banana)
-  
-  }
-  
-  
-|]
--}

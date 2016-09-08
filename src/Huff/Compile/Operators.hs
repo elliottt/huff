@@ -6,7 +6,8 @@ module Huff.Compile.Operators (
   expandActions,
   removeQuantifiers,
   removeDisjunction,
-  removeNegation
+  removeNegation,
+  ArgEnv,
   ) where
 
 import           Huff.Compile.AST
@@ -23,11 +24,11 @@ import qualified Data.Text as T
 
 -- | Expand out instances of an operator, based on the types of its parameters.
 -- This is similar to the case of existential elimination covered lower down.
-expandActions :: TypeMap Name -> Operator a -> [(ArgEnv,Operator a)]
+expandActions :: TypeMap Name -> Operator a -> [(ArgEnv,[Name],Operator a)]
 expandActions types op @ Operator { .. }
 
   | null opParams =
-    return (Map.empty, op)
+    return (Map.empty, [], op)
 
   | otherwise     =
     do (env,args) <- params opParams
@@ -36,7 +37,7 @@ expandActions types op @ Operator { .. }
                           , opParams  = []
                           , ..
                           }
-       return (env, op')
+       return (env, args, op')
 
   where
 
@@ -206,38 +207,14 @@ negLit (LNot  a) = LAtom a
 -- INVARIANT: This stage removes all negative literals from the preconditions of
 -- operators and conditional effects, replacing them with other literals that
 -- correspond to their negation.
-removeNegation :: Problem -> [Operator a] -> (Problem,[Operator a])
-removeNegation prob ops
-  | Set.null negs = (prob,ops)
-  | otherwise     = (prob', map (cnOper negs) ops)
+removeNegation :: [Operator a] -> (Set.Set Atom, [Operator a])
+removeNegation ops
+  | Set.null negs = (Set.empty, ops)
+  | otherwise     = (negs, map (cnOper negs) ops)
   where
 
   -- the set of predicates that are are used as negative preconditions
   negs = foldMap negPreconds ops
-
-  -- initialize the negated atoms, if their counterparts are missing from the
-  -- initial state
-  prob' = prob { probInit = initNegs negs (probInit prob) }
-
--- | Generate the initial state, given the set of atoms that show up as negative
--- preconditions, and the existing initial state.
-initNegs :: Set.Set Atom -> [Literal] -> [Literal]
-
--- pass non-negative atoms through, that are mentioned in the initial state
-initNegs negs (LAtom a : ls)
-  | a `Set.member` negs = LAtom a : initNegs (Set.delete a negs) ls
-  | otherwise           = LAtom a : initNegs               negs  ls
-
--- we can safely remove negative initial conditions that aren't used as negative
--- preconditions
-initNegs negs (LNot a : ls)
-  | a `Set.member` negs = LAtom (negAtom a) : initNegs (Set.delete a negs) ls
-  | otherwise           =                     initNegs (Set.delete a negs) ls
-
--- the remaining set of atoms are depended on as negative preconditions, but
--- unset in the initial state.  their negative variants are set.
-initNegs negs [] =
-  [ LAtom (negAtom a) | a <- Set.toList negs ]
 
 
 negPreconds :: Operator a -> Set.Set Atom
@@ -299,6 +276,3 @@ cnEffects negs = go
 cnLiteral :: Literal -> Literal
 cnLiteral (LNot a) = LAtom (negAtom a)
 cnLiteral l        = l
-
-negAtom :: Atom -> Atom
-negAtom (Atom a as) = Atom (T.append "$not-" a) as

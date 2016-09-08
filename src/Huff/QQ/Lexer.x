@@ -49,7 +49,6 @@ $white+ ;
 "requires"  { keyword K_requires  }
 "effect"    { keyword K_effect    }
 "object"    { keyword K_object    }
-"problem"   { keyword K_problem   }
 
 @ident      { matchText >>= \t -> lexeme (TIdent    t) }
 @conident   { matchText >>= \t -> lexeme (TConIdent t) }
@@ -85,8 +84,6 @@ data Keyword = K_domain
              | K_comma
              | K_colon
              | K_not
-
-             | K_problem
                deriving (Show)
 
 keyword :: Keyword -> Action () [Lexeme Token]

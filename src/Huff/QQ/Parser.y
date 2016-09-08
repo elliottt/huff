@@ -7,7 +7,8 @@ module Huff.QQ.Parser where
 
 import Huff.Compile.AST
 import Huff.QQ.Lexer (lexer,Lexeme(..),Token(..),Keyword(..),SourcePos,sourceFrom)
-import Debug.Trace
+
+import qualified Data.Text as T
 
 }
 
@@ -23,7 +24,6 @@ import Debug.Trace
   'operator'  { KW K_operator  $$ }
   'requires'  { KW K_requires  $$ }
   'effect'    { KW K_effect    $$ }
-  'problem'   { KW K_problem   $$ }
   '{'         { KW K_lbrace    $$ }
   '}'         { KW K_rbrace    $$ }
   '('         { KW K_lparen    $$ }
@@ -37,32 +37,25 @@ import Debug.Trace
 %monad { Parse }
 %error { parseError }
 
-%name decls decls
+%name domains domains
 
 %%
 
--- Declarations ----------------------------------------------------------------
-
-decls :: { [Decl ()] }
-  : list(decl) { $1 }
-
-decl :: { Decl () }
-  : domain  { DDomain  $1 }
-  | problem { DProblem $1 }
-
-
 -- Domains ---------------------------------------------------------------------
 
-domain :: { Domain () }
+domains :: { [Domain T.Text] }
+  : list1(domain) { $1 }
+
+domain :: { Domain T.Text }
   : 'domain' CONIDENT '{' list(domain_elem) '}'
     { foldr id (Domain (lexemeText $2) [] [] []) $4 }
 
-domain_elem :: { Domain () -> Domain () }
+domain_elem :: { Domain T.Text -> Domain T.Text }
   : object_decl    { $1 }
   | predicate_decl { $1 }
   | operator_decl  { $1 }
 
-object_decl :: { Domain () -> Domain () }
+object_decl :: { Domain T.Text -> Domain T.Text }
   : 'object' type '=' sep1(CONIDENT, '|')
     { let { objs = [ Typed lexemeText $2 | Lexeme { .. } <- $4 ] }
        in \dom -> dom { domObjects = objs ++ domObjects dom } }
@@ -70,15 +63,15 @@ object_decl :: { Domain () -> Domain () }
 type :: { Type }
   : CONIDENT { lexemeText $1 }
 
-predicate_decl :: { Domain () -> Domain () }
+predicate_decl :: { Domain T.Text -> Domain T.Text }
   : 'predicate' sep1(predicate_spec, ',')
     { foldr (.) id $2 } 
 
-predicate_spec :: { Domain () -> Domain () }
+predicate_spec :: { Domain T.Text -> Domain T.Text }
   : IDENT '(' sep1(type, ',') ')'
     { \dom -> dom { domPreds = App (lexemeText $1) $3 : domPreds dom } }
 
-operator_decl :: { Domain () -> Domain () }
+operator_decl :: { Domain T.Text -> Domain T.Text }
   : 'operator' CONIDENT '(' sep(param, ',') ')' '{'
        'requires' ':' sep1(term,   ',')
        'effect'   ':' sep1(effect, ',')
@@ -86,7 +79,7 @@ operator_decl :: { Domain () -> Domain () }
     { let { op = Operator { opName = lexemeText $2
                           , opDerived = False
                           , opParams = $4
-                          , opVal = Just ()
+                          , opVal = Just (lexemeText $2)
                           , opPrecond = TAnd $9
                           , opEffects = EAnd $12
                           } }
@@ -103,8 +96,11 @@ term :: { Term }
   | '!' term { TNot $2 }
 
 effect :: { Effect }
-  : atom     { ELit (LAtom $1) }
-  | '!' atom { ELit (LNot $2) }
+  : literal { ELit $1 }
+
+literal :: { Literal }
+  :     atom { LAtom $1 }
+  | '!' atom { LNot  $2 }
 
 atom :: { Atom }
   : IDENT '(' sep1(arg, ',') ')'
@@ -113,12 +109,6 @@ atom :: { Atom }
 arg :: { Arg }
   : IDENT    { AVar  (lexemeText $1) }
   | CONIDENT { AName (lexemeText $1) }
-
-
--- Problems --------------------------------------------------------------------
-
-problem :: { Problem }
-  : 'problem' { undefined }
 
 
 -- Utilities -------------------------------------------------------------------
@@ -162,8 +152,8 @@ parseError []      = Left (ParseError Nothing)
 
 pattern KW k loc <- Lexeme { lexemeToken = TKeyword k, lexemeRange = loc }
 
-parseQQ :: SourcePos -> String -> Parse [Decl ()]
-parseQQ start str = decls toks
+parseQQ :: SourcePos -> String -> Parse [Domain T.Text]
+parseQQ start str = domains toks
   where
   toks = lexer start str
 
