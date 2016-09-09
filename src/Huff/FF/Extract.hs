@@ -97,13 +97,13 @@ extractPlan goals0 =
 
        let existingGoal =
              or [ maybe False (== level) true
-                  -- ^ the fact was added by something else at this level
+                  -- the fact was added by something else at this level
 
                 , goal
-                  -- ^ the fact is already a goal
+                  -- the fact is already a goal
 
                 , l == 0
-                  -- ^ the fact exists in the initial layer
+                  -- the fact exists in the initial layer
                 ]
 
        if existingGoal
