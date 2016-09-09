@@ -42,8 +42,6 @@ library
                        hashable,
                        unordered-containers,
                        text,
-                       monadLib,
-                       simple-smt,
                        array,
                        template-haskell
 
