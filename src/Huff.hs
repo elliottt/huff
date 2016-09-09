@@ -47,26 +47,3 @@ findPlan (prob,dom) =
      case mb of
        Just xs -> return (Just (mapMaybe opVal (FF.resSteps xs)))
        Nothing -> return Nothing
-
-
-[huff|
-
-  domain BlocksWorld {
-
-    object Object = Table | A | B | C
-
-    predicate isTable(Object), on(Object, Object), clear(Object)
-
-    operator MoveToTable(b: Object,x: Object) {
-      requires: on(b,x), clear(b)
-      effect:   on(b,Table), clear(x)
-    }
-
-    operator Move(b: Object, x: Object, y: Object) {
-      requires: on(b,x), clear(b), clear(y)
-      effect: on(b,y), clear(x), !clear(y)
-    }
-  
-  }
-
-|]

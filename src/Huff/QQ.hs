@@ -136,11 +136,14 @@ genDomainValue Domain { .. } =
        [d| $(varP n) =
              let types = $(liftTypes typesC)
                  ops   = $(listE (map liftOperator opsC))
-              in \ start goal -> compileProblem types ops (Problem start goal)
+              in \ start goal ->
+                   if null goal
+                      then error "invalid goal specification"
+                      else compileProblem types ops (Problem start (foldr1 (/\) goal))
          |]
 
      let domType = mkName (T.unpack domName)
-     sigType <- [t| [AST.Literal] -> AST.Term -> Input.Spec $(conT domType) |]
+     sigType <- [t| [AST.Literal] -> [AST.Term] -> Input.Spec $(conT domType) |]
      let sig = SigD n sigType
 
      return (sig:body)
