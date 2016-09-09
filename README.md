@@ -43,14 +43,15 @@ import Huff
 
 ```
 
-The quasi-quoter will introduce five new declarations:
+The quasi-quoter will introduce the following declarations:
 * A data declaration for the `Obj` object
 * A data declaration for the `BlocksWorld` domain, that will consist of two
   constructors `Move :: Obj -> Obj -> Obj -> BlocksWorld` and `MoveToTable ::
   Obj -> Obj -> BlocksWorld`
 * Two classes called `Has_on` and `Has_clear`, that define the `on` and `clear`
   functions, respectively
-* The `blocksWorld` function of the type `[Literal] -> Term -> Spec BlocksWorld`
+* Instances of the two `Has` classes for `Literal` and `Term`
+* The `blocksWorld` function of the type `[Literal] -> [Term] -> Spec BlocksWorld`
 
 The `blocksWorld` function accepts the initial state and goal, and produces a
 `Spec BlocksWorld` value that can be used in conjunction with the `findPlan`
